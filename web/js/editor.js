@@ -1,6 +1,6 @@
 // Editor de texto rico (contenteditable) + blocos de código com destaque de sintaxe.
 import { esc, plainFromHTML } from './ui.js';
-import { suggest } from './autocomplete.js';
+import { suggest, handleKey, expandSnippet, insertText } from './autocomplete.js';
 
 export const LANGS = [
   ['python', 'Python'], ['javascript', 'JavaScript'], ['typescript', 'TypeScript'],
@@ -73,12 +73,8 @@ export function init(editorEl, pageEl, callbacks) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSuggest(block); return; }
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', 'PageUp', 'PageDown'].includes(e.key)) closeSuggest(block);
     }
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end');
-      highlight(block);
-      cb.onChange();
-    }
+    if (e.isComposing) return;
+    if (handleKey(e, ta, block.dataset.lang)) e.preventDefault();
   });
   document.addEventListener('selectionchange', () => {
     const s = getSelection();
@@ -195,7 +191,7 @@ const acState = new WeakMap(); // bloco → { start, prefix, items, index }
 function updateSuggest(ta) {
   const block = ta.closest('.codeblock');
   const caret = ta.selectionStart;
-  const s = ta.selectionStart === ta.selectionEnd ? suggest(block.dataset.lang, ta.value, caret) : null;
+  const s = !suppressSuggest && ta.selectionStart === ta.selectionEnd ? suggest(block.dataset.lang, ta.value, caret) : null;
   if (!s) { closeSuggest(block); highlight(block); return; }
   acState.set(block, { ...s, index: 0 });
   renderSuggest(block);
@@ -206,7 +202,11 @@ function renderSuggest(block) {
   if (!st) return;
   const ta = block.querySelector('textarea');
   const pick = st.items[st.index];
-  const rest = pick.toLowerCase().startsWith(st.prefix.toLowerCase()) ? pick.slice(st.prefix.length) : '';
+  // texto em cinza: prévia da 1ª linha do snippet, ou o resto da palavra
+  const preview = pick.snippet ? pick.snippet.split('\n')[0].replace(/\$\{([^}]*)\}/g, '$1').replace('$0', '') : pick.label;
+  const lowP = st.prefix.toLowerCase();
+  const rest = preview.toLowerCase().startsWith(lowP) ? preview.slice(st.prefix.length)
+    : pick.label.toLowerCase().startsWith(lowP) ? pick.label.slice(st.prefix.length) : '';
   highlight(block, { pos: ta.selectionStart, text: rest });
   let list = block.querySelector('.cb-ac');
   if (!list) {
@@ -214,10 +214,12 @@ function renderSuggest(block) {
     list.className = 'cb-ac';
     block.querySelector('.cb-body').append(list);
   }
-  list.innerHTML = st.items.map((w, i) => `<li data-i="${i}" class="${i === st.index ? 'on' : ''}">${esc(w)}${i === st.index ? '<kbd>Tab</kbd>' : ''}</li>`).join('');
+  const KIND = { snippet: ['⧉', 'snippet'], keyword: ['◆', 'palavra-chave'], var: ['𝑥', 'do seu código'] };
+  list.innerHTML = st.items.map((it, i) => `<li data-i="${i}" class="${i === st.index ? 'on' : ''}" title="${KIND[it.kind][1]}">
+      <span class="k k-${it.kind}">${KIND[it.kind][0]}</span><span class="l">${esc(it.label)}</span>${i === st.index ? '<kbd>Tab</kbd>' : `<small>${KIND[it.kind][1]}</small>`}</li>`).join('');
   const mark = block.querySelector('.cb-ghost');
   const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-  list.style.left = Math.max(0, Math.min(mark.offsetLeft, block.clientWidth - 220)) + 'px';
+  list.style.left = Math.max(0, Math.min(mark.offsetLeft, block.clientWidth - 260)) + 'px';
   list.style.top = mark.offsetTop + lh + 2 + 'px';
 }
 
@@ -225,11 +227,17 @@ function acceptSuggest(block, index) {
   const st = acState.get(block);
   if (!st) return;
   const ta = block.querySelector('textarea');
-  ta.setRangeText(st.items[index], st.start, ta.selectionStart, 'end');
+  const it = st.items[index], end = ta.selectionStart;
   closeSuggest(block);
   ta.focus();
-  cb.onChange();
+  suppressSuggest = true;
+  try {
+    if (it.snippet) expandSnippet(ta, st.start, end, it.snippet);
+    else insertText(ta, it.label, st.start, end);
+  } finally { suppressSuggest = false; }
+  highlight(block);
 }
+let suppressSuggest = false;
 
 function closeSuggest(block) {
   if (!block) return;
@@ -289,7 +297,8 @@ export function getHTML() {
     pre.append(code);
     c.replaceWith(pre);
   });
-  return clone.innerHTML;
+  clone.querySelectorAll('[data-caret-style]').forEach(s => s.removeAttribute('data-caret-style'));
+  return clone.innerHTML.replace(/​/g, '');
 }
 
 export const plainText = () => plainFromHTML(getHTML());
@@ -325,8 +334,40 @@ function restore() {
   }
 }
 
+// Com o cursor parado (sem seleção), o navegador guarda o estilo só como "pendente"
+// e perde ao trocar o foco. Aqui criamos um trecho já formatado com o cursor dentro,
+// assim o que for digitado em seguida sai com a cor/fonte/tamanho escolhidos.
+const ZW = '​';
+function styleAtCaret(styles) {
+  const sel = getSelection();
+  if (!sel.rangeCount) return false;
+  const r = sel.getRangeAt(0);
+  if (!r.collapsed || !el.contains(r.startContainer)) return false;
+  // se o cursor já está num trecho vazio criado agora, só acrescenta o estilo
+  const host = r.startContainer.nodeType === 3 ? r.startContainer.parentElement : r.startContainer;
+  let span;
+  if (host?.dataset?.caretStyle !== undefined && host.textContent === ZW) span = host;
+  else {
+    span = document.createElement('span');
+    span.dataset.caretStyle = '';
+    span.textContent = ZW;
+    r.insertNode(span);
+  }
+  Object.assign(span.style, styles);
+  const nr = document.createRange();
+  nr.setStart(span.firstChild, 1);
+  nr.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(nr);
+  savedRange = nr.cloneRange();
+  return true;
+}
+
+const CMD_STYLE = { foreColor: 'color', hiliteColor: 'backgroundColor', fontName: 'fontFamily' };
+
 export function format(cmd, value = null) {
   restore();
+  if (CMD_STYLE[cmd] && styleAtCaret({ [CMD_STYLE[cmd]]: value })) { cb.onFormat(); return; }
   document.execCommand('styleWithCSS', false, true);
   document.execCommand(cmd, false, value);
   cb.onFormat();
@@ -340,15 +381,29 @@ export function formatBlock(tag) {
 
 export function setSelectionFontSize(px) {
   restore();
+  if (styleAtCaret({ fontSize: px + 'px' })) { cb.onFormat(); return; }
   document.execCommand('styleWithCSS', false, true);
   document.execCommand('fontSize', false, '7');
+  const touched = [];
   el.querySelectorAll('font[size="7"]').forEach(f => {
     const s = document.createElement('span');
     s.style.fontSize = px + 'px';
     s.append(...f.childNodes);
     f.replaceWith(s);
+    touched.push(s);
   });
-  el.querySelectorAll('[style*="xxx-large"]').forEach(n => (n.style.fontSize = px + 'px'));
+  el.querySelectorAll('[style*="xxx-large"]').forEach(n => { n.style.fontSize = px + 'px'; touched.push(n); });
+  // mantém o trecho selecionado para poder aplicar cor/fonte em seguida
+  if (touched.length) {
+    touched.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    const r = document.createRange();
+    r.setStartBefore(touched[0]);
+    r.setEndAfter(touched[touched.length - 1]);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    savedRange = r.cloneRange();
+  }
   cb.onFormat();
 }
 

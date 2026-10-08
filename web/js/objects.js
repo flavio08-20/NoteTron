@@ -259,6 +259,16 @@ export function nudge(dx, dy) {
   commit();
 }
 
+/** No modo texto: seleciona e começa a mover um objeto "atrás do texto" no ponto clicado. */
+export function pickBehind(e) {
+  if (mode !== 'text') return false;
+  const hit = hitTest(pt(e), 0, o => o.behind);
+  if (!hit) return false;
+  select(hit.id);
+  startMove(e);
+  return true;
+}
+
 export function addImage(src, natW, natH, at) {
   const pw = page.clientWidth;
   const w = Math.min(natW, 420, pw * 0.7), h = (natH * w) / natW;

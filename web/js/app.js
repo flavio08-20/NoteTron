@@ -900,7 +900,18 @@ function bindApp() {
     onCommit: () => { pushHistory(); markDirty(); },
     onSelect: fillObjbar,
   });
-  $('#editor').addEventListener('pointerdown', () => ob.selectedObj() && ob.select(null));
+  // Clique no texto: se não caiu sobre letras e há uma imagem/forma "atrás do texto"
+  // nesse ponto, seleciona e arrasta o objeto em vez de posicionar o cursor.
+  $('#page').addEventListener('pointerdown', e => {
+    const t = e.target;
+    const onTextArea = t.id === 'page' || t.closest('#editor');
+    if (!onTextArea || t.closest('.codeblock')) return; // objetos da frente, alças e blocos de código têm seus próprios cliques
+    if (e.button === 0 && (e.altKey || !isOverText(e.clientX, e.clientY)) && ob.pickBehind(e)) {
+      e.preventDefault();
+      return;
+    }
+    if (ob.selectedObj()) ob.select(null);
+  }, true);
 
   // ---- gaveta ----
   $('#new-note').onclick = () => newNoteDialog();
@@ -958,18 +969,27 @@ function bindApp() {
     else if (v) ed.setSelectionFontSize(v);
     e.target.value = '';
   };
-  const fc = $('#font-color'), bc = $('#bg-color');
-  const syncSw = () => { $('#font-color-sw').style.background = fc.value; $('#bg-color-sw').style.background = bc.value; };
-  syncSw();
-  fc.oninput = bc.oninput = syncSw;
-  fc.onchange = () => {
-    if (scope === 'note') { noteStyle.color = fc.value; ed.clearInline('color'); applyNote(); }
-    else ed.format('foreColor', fc.value);
+  // Seletores de cor: o evento "change" só dispara se a cor mudar. Depois de aplicar,
+  // ajustamos o valor em 1 tom imperceptível para que escolher a MESMA cor de novo funcione.
+  const nudge = hex => '#' + (parseInt(hex.slice(1), 16) ^ 1).toString(16).padStart(6, '0');
+  const colorPicker = (input, sw, apply) => {
+    sw.style.background = input.value;
+    input.addEventListener('input', () => { sw.style.background = input.value; });
+    input.addEventListener('change', () => {
+      const v = input.value;
+      sw.style.background = v;
+      apply(v);
+      input.value = nudge(v);
+    });
   };
-  bc.onchange = () => {
-    if (scope === 'note') { noteStyle.bg = bc.value; applyNote(); }
-    else ed.format('hiliteColor', bc.value);
-  };
+  colorPicker($('#font-color'), $('#font-color-sw'), v => {
+    if (scope === 'note') { noteStyle.color = v; ed.clearInline('color'); applyNote(); }
+    else ed.format('foreColor', v);
+  });
+  colorPicker($('#bg-color'), $('#bg-color-sw'), v => {
+    if (scope === 'note') { noteStyle.bg = v; applyNote(); }
+    else ed.format('hiliteColor', v);
+  });
 
   // ---- desenho ----
   $$('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
@@ -1057,6 +1077,31 @@ function bindApp() {
 
   addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
   addEventListener('beforeunload', () => { if (unsaved) saveCurrent(); });
+}
+
+// O ponto (x, y) está em cima de alguma letra do texto?
+function isOverText(x, y) {
+  let node, offset;
+  if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (!p) return false;
+    node = p.offsetNode; offset = p.offset;
+  } else if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (!r) return false;
+    node = r.startContainer; offset = r.startOffset;
+  } else return true;
+  if (!node || node.nodeType !== 3 || !$('#editor').contains(node)) return false;
+  const r = document.createRange();
+  for (const [a, b] of [[offset - 1, offset], [offset, offset + 1]]) {
+    if (a < 0 || b > node.length) continue;
+    r.setStart(node, a);
+    r.setEnd(node, b);
+    for (const box of r.getClientRects()) {
+      if (x >= box.left - 3 && x <= box.right + 3 && y >= box.top - 2 && y <= box.bottom + 2) return true;
+    }
+  }
+  return false;
 }
 
 function applyNote() {
