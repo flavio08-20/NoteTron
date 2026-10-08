@@ -47,7 +47,10 @@ Em **Painel → Project Settings → API**, copie a chave **anon / publishable**
 ### 5. Autenticação
 - **Authentication → URL Configuration**: em *Site URL* e *Redirect URLs*, coloque o endereço onde o app ficar hospedado (ex.: `https://notetron.netlify.app`).
 - **SMTP próprio** (Authentication → Emails → SMTP): o envio de e-mail padrão do Supabase só entrega para membros do projeto e tem limite baixo por hora. Para distribuir o app, configure um provedor (Resend, Brevo, SendGrid…).
-- **Authentication → Emails → Templates → Magic Link**: cole o conteúdo de `supabase/templates/magic-link.html`. Assim o e-mail de troca/recuperação de senha traz o **código e o link**.
+- **Authentication → Emails → Templates**, para os e-mails trazerem **código e link**:
+  - **Confirm signup**: assunto `Confirme seu e-mail no NoteTron`, corpo `supabase/templates/confirm-signup.html`.
+  - **Magic Link**: assunto `Seu código do NoteTron`, corpo `supabase/templates/magic-link.html` (troca/recuperação de senha das anotações).
+- **Authentication → Providers → Email**: deixe **Confirm email** ligado (sem confirmar, a conta não entra).
 
 ### 6. Hospedagem
 Publique a pasta `web/` em qualquer hospedagem estática com HTTPS, como Netlify, Vercel, Cloudflare Pages ou GitHub Pages.

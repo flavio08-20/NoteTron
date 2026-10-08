@@ -92,11 +92,17 @@ function bindAuth() {
     try {
       if (authTab === 'login') {
         const { error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) {
+          // conta criada mas e-mail ainda não confirmado: oferece a confirmação por código
+          if (/email not confirmed/i.test(error.message)) { btn.disabled = false; return confirmSignupDialog(email, { resendNow: true }); }
+          throw error;
+        }
       } else {
         const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: appUrl() } });
         if (error) throw error;
-        if (!data.session) authMsg('Conta criada! Confirme pelo link que enviamos ao seu e-mail e depois entre.', 'ok');
+        // o Supabase não revela se o e-mail já existe; uma conta sem identidades indica isso
+        if (data.user && !data.user.identities?.length) throw new Error('User already registered');
+        if (!data.session) { btn.disabled = false; return confirmSignupDialog(email); }
       }
     } catch (err) {
       authMsg(translateAuth(err.message), 'err');
@@ -122,6 +128,35 @@ function bindAuth() {
     localStorage.setItem('nt_local_mode', '1');
     enterApp('local', { id: 'local', email: 'Somente neste aparelho' });
   };
+}
+
+// Confirmação do e-mail na criação da conta: código digitado ou link do e-mail.
+// Sem essa confirmação a conta não consegue entrar no app.
+async function confirmSignupDialog(email, { resendNow = false } = {}) {
+  const resend = async () => {
+    const { error } = await sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: appUrl() } });
+    if (error) toast(translateAuth(error.message), 'err', 5000);
+    else toast('Enviamos um novo código para o seu e-mail.');
+  };
+  if (resendNow) await resend();
+  const r = await modal({
+    title: 'Confirme seu e-mail',
+    body: `<p>Enviamos um código de confirmação para <b>${esc(email)}</b>.</p>
+      <p class="muted">Digite o código abaixo ou clique no link do e-mail (pode ser em outro aparelho). Sem confirmar, a conta não pode ser usada.</p>
+      <label>Código<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>
+      <button type="button" class="link" data-resend style="justify-self:start">Não recebeu? Reenviar código</button>`,
+    buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Confirmar', value: 'ok', primary: true }],
+    init: dlg => { dlg.querySelector('[data-resend]').onclick = resend; },
+    validate: async (v, d) => {
+      const token = d.code.replace(/\s/g, '');
+      if (!token) return 'Digite o código que chegou no seu e-mail.';
+      let { error } = await sb.auth.verifyOtp({ email, token, type: 'signup' });
+      if (error) ({ error } = await sb.auth.verifyOtp({ email, token, type: 'email' }));
+      if (error) return 'Código inválido ou expirado. Confira ou peça um novo.';
+    },
+  });
+  if (r) { authMsg(''); toast('E-mail confirmado! Bem-vindo ao NoteTron.'); }
+  else authMsg('Sua conta só pode ser usada depois de confirmar o e-mail. Ao entrar, enviaremos um novo código.', 'warn');
 }
 
 function authMsg(text, type = '') {

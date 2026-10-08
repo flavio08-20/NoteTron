@@ -6,3 +6,4 @@ Thumbs.db
 .env.*
 supabase/.temp/
 .claude/settings.local.json
+.claude/
