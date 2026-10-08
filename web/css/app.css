@@ -231,6 +231,11 @@ textarea { resize: vertical; }
 /* bloco de código */
 .codeblock { margin: .8em 0; border: 1px solid var(--border); border-radius: 10px; background: var(--code-bg); font-size: 14px; user-select: none; }
 .cb-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 4px 8px; border-bottom: 1px solid var(--border); background: var(--panel-2); font-family: Inter, system-ui, sans-serif; border-radius: 10px 10px 0 0; }
+.cb-grip { cursor: grab; touch-action: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 4px 6px; margin-left: -2px; border-radius: 6px; user-select: none; }
+.cb-grip:hover { background: var(--hover); color: var(--text); }
+.codeblock.dragging { opacity: .45; outline: 2px dashed var(--accent); outline-offset: 2px; }
+body.dragging-block, body.dragging-block * { cursor: grabbing !important; user-select: none !important; }
+.cb-drop-line { position: absolute; left: 40px; right: 40px; height: 4px; border-radius: 2px; background: var(--accent); z-index: 6; pointer-events: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 .cb-ghost { color: var(--muted); opacity: .75; }
 .cb-ac { position: absolute; z-index: 20; margin: 0; padding: 4px; list-style: none; min-width: 180px; max-width: 320px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); font: 13px/1.4 "Roboto Mono", ui-monospace, monospace; }
 .cb-ac li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 8px; border-radius: 5px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

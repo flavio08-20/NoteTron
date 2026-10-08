@@ -28,6 +28,10 @@ export function init(editorEl, pageEl, callbacks) {
     cb.onChange();
   });
   el.addEventListener('focusout', e => { if (e.target.classList?.contains('cb-ta')) closeSuggest(e.target.closest('.codeblock')); });
+  el.addEventListener('pointerdown', e => {
+    const grip = e.target.closest('.cb-grip');
+    if (grip && e.button === 0) startBlockDrag(e, grip.closest('.codeblock'));
+  });
   el.addEventListener('mousedown', e => {
     // clicar numa opção da lista não pode tirar o foco do código
     const opt = e.target.closest('.cb-ac li');
@@ -104,6 +108,7 @@ function makeCodeBlock(lang, text) {
   w.contentEditable = 'false';
   w.dataset.lang = lang;
   w.innerHTML = `<div class="cb-head">
+      <span class="cb-grip" title="Arraste para mover o bloco" aria-label="Mover bloco">⠿</span>
       <select class="cb-lang" title="Linguagem">${LANGS.map(([v, l]) => `<option value="${v}"${v === lang ? ' selected' : ''}>${l}</option>`).join('')}</select>
       <span class="sp"></span>
       <button type="button" class="cb-copy">Copiar</button>
@@ -130,6 +135,58 @@ function highlight(block, ghost = null) {
     ? hl(text.slice(0, ghost.pos), block.dataset.lang) + `<span class="cb-ghost">${esc(ghost.text)}</span>` + hl(text.slice(ghost.pos), block.dataset.lang)
     : hl(text, block.dataset.lang);
   code.insertAdjacentText('beforeend', '\n');
+}
+
+// ---------- arrastar blocos de código ----------
+function startBlockDrag(e, block) {
+  e.preventDefault();
+  closeSuggest(block);
+  const ws = page.parentElement;
+  const line = document.createElement('div');
+  line.className = 'cb-drop-line';
+  page.append(line);
+  block.classList.add('dragging');
+  document.body.classList.add('dragging-block');
+  let target = null, lastY = e.clientY, scrollTimer = null;
+
+  const place = y => {
+    lastY = y;
+    const kids = [...el.children].filter(c => c !== block);
+    target = kids.find(c => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; }) || null;
+    const pr = page.getBoundingClientRect();
+    const ref = target ? target.getBoundingClientRect().top : (kids.length ? kids[kids.length - 1].getBoundingClientRect().bottom : el.getBoundingClientRect().top);
+    line.style.top = ref - pr.top - 2 + 'px';
+  };
+  // rolagem automática perto das bordas da área de trabalho
+  scrollTimer = setInterval(() => {
+    const r = ws.getBoundingClientRect();
+    const dy = lastY < r.top + 50 ? -14 : lastY > r.bottom - 50 ? 14 : 0;
+    if (dy) { ws.scrollTop += dy; place(lastY); }
+  }, 30);
+
+  const move = ev => { if (ev.pointerId === e.pointerId) { ev.preventDefault(); place(ev.clientY); } };
+  const up = ev => {
+    if (ev.pointerId !== e.pointerId) return;
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    removeEventListener('pointercancel', up);
+    clearInterval(scrollTimer);
+    line.remove();
+    block.classList.remove('dragging');
+    document.body.classList.remove('dragging-block');
+    if (ev.type === 'pointercancel') return;
+    const before = block.nextElementSibling;
+    if (target !== before) {
+      el.insertBefore(block, target);
+      // garante uma linha de texto depois do bloco para continuar escrevendo
+      if (!block.nextElementSibling) { const p = document.createElement('p'); p.innerHTML = '<br>'; block.after(p); }
+      cb.onFormat();
+    }
+  };
+  addEventListener('pointermove', move, { passive: false });
+  addEventListener('pointerup', up);
+  addEventListener('pointercancel', up);
+  place(e.clientY);
 }
 
 // ---------- autocompletar ----------
