@@ -1,5 +1,6 @@
 // Editor de texto rico (contenteditable) + blocos de código com destaque de sintaxe.
 import { esc, plainFromHTML } from './ui.js';
+import { suggest } from './autocomplete.js';
 
 export const LANGS = [
   ['python', 'Python'], ['javascript', 'JavaScript'], ['typescript', 'TypeScript'],
@@ -22,9 +23,16 @@ export function init(editorEl, pageEl, callbacks) {
   try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch {}
 
   el.addEventListener('input', e => {
-    if (e.target.classList?.contains('cb-ta')) highlight(e.target.closest('.codeblock'));
+    if (e.target.classList?.contains('cb-ta')) updateSuggest(e.target);
     updateEmpty();
     cb.onChange();
+  });
+  el.addEventListener('focusout', e => { if (e.target.classList?.contains('cb-ta')) closeSuggest(e.target.closest('.codeblock')); });
+  el.addEventListener('mousedown', e => {
+    // clicar numa opção da lista não pode tirar o foco do código
+    const opt = e.target.closest('.cb-ac li');
+    if (opt) { e.preventDefault(); acceptSuggest(opt.closest('.codeblock'), +opt.dataset.i); return; }
+    if (e.target.classList?.contains('cb-ta')) closeSuggest(e.target.closest('.codeblock'));
   });
   el.addEventListener('change', e => {
     if (!e.target.classList.contains('cb-lang')) return;
@@ -47,10 +55,24 @@ export function init(editorEl, pageEl, callbacks) {
   });
   el.addEventListener('keydown', e => {
     const ta = e.target.classList?.contains('cb-ta') ? e.target : null;
-    if (ta && e.key === 'Tab') {
+    if (!ta) return;
+    const block = ta.closest('.codeblock');
+    const st = acState.get(block);
+    if (st) {
+      if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); acceptSuggest(block, st.index); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        st.index = (st.index + (e.key === 'ArrowDown' ? 1 : -1) + st.items.length) % st.items.length;
+        renderSuggest(block);
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSuggest(block); return; }
+      if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', 'PageUp', 'PageDown'].includes(e.key)) closeSuggest(block);
+    }
+    if (e.key === 'Tab') {
       e.preventDefault();
       ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end');
-      highlight(ta.closest('.codeblock'));
+      highlight(block);
       cb.onChange();
     }
   });
@@ -93,16 +115,70 @@ function makeCodeBlock(lang, text) {
   return w;
 }
 
-function highlight(block) {
+function hl(text, lang) {
+  try {
+    return window.hljs ? hljs.highlight(text, { language: HL[lang] || 'plaintext', ignoreIllegals: true }).value : esc(text);
+  } catch { return esc(text); }
+}
+
+// ghost: { pos, text } → mostra o texto sugerido em cinza na posição do cursor
+function highlight(block, ghost = null) {
   if (!block) return;
   const text = block.querySelector('textarea').value;
   const code = block.querySelector('code');
-  try {
-    code.innerHTML = window.hljs
-      ? hljs.highlight(text, { language: HL[block.dataset.lang] || 'plaintext', ignoreIllegals: true }).value
-      : esc(text);
-  } catch { code.textContent = text; }
+  code.innerHTML = ghost
+    ? hl(text.slice(0, ghost.pos), block.dataset.lang) + `<span class="cb-ghost">${esc(ghost.text)}</span>` + hl(text.slice(ghost.pos), block.dataset.lang)
+    : hl(text, block.dataset.lang);
   code.insertAdjacentText('beforeend', '\n');
+}
+
+// ---------- autocompletar ----------
+const acState = new WeakMap(); // bloco → { start, prefix, items, index }
+
+function updateSuggest(ta) {
+  const block = ta.closest('.codeblock');
+  const caret = ta.selectionStart;
+  const s = ta.selectionStart === ta.selectionEnd ? suggest(block.dataset.lang, ta.value, caret) : null;
+  if (!s) { closeSuggest(block); highlight(block); return; }
+  acState.set(block, { ...s, index: 0 });
+  renderSuggest(block);
+}
+
+function renderSuggest(block) {
+  const st = acState.get(block);
+  if (!st) return;
+  const ta = block.querySelector('textarea');
+  const pick = st.items[st.index];
+  const rest = pick.toLowerCase().startsWith(st.prefix.toLowerCase()) ? pick.slice(st.prefix.length) : '';
+  highlight(block, { pos: ta.selectionStart, text: rest });
+  let list = block.querySelector('.cb-ac');
+  if (!list) {
+    list = document.createElement('ul');
+    list.className = 'cb-ac';
+    block.querySelector('.cb-body').append(list);
+  }
+  list.innerHTML = st.items.map((w, i) => `<li data-i="${i}" class="${i === st.index ? 'on' : ''}">${esc(w)}${i === st.index ? '<kbd>Tab</kbd>' : ''}</li>`).join('');
+  const mark = block.querySelector('.cb-ghost');
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
+  list.style.left = Math.max(0, Math.min(mark.offsetLeft, block.clientWidth - 220)) + 'px';
+  list.style.top = mark.offsetTop + lh + 2 + 'px';
+}
+
+function acceptSuggest(block, index) {
+  const st = acState.get(block);
+  if (!st) return;
+  const ta = block.querySelector('textarea');
+  ta.setRangeText(st.items[index], st.start, ta.selectionStart, 'end');
+  closeSuggest(block);
+  ta.focus();
+  cb.onChange();
+}
+
+function closeSuggest(block) {
+  if (!block) return;
+  const had = acState.delete(block);
+  block.querySelector('.cb-ac')?.remove();
+  if (had) highlight(block);
 }
 
 // transforma <pre> soltos (vindos de colagem, importação ou IA) em blocos de código

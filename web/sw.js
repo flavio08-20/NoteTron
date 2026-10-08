@@ -1,9 +1,9 @@
 // Service worker do NoteTron: deixa o app abrir offline.
-const VERSION = 'notetron-v1';
+const VERSION = 'notetron-v2';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/config.js', 'js/icons.js', 'js/ui.js', 'js/db.js', 'js/store.js', 'js/crypto.js',
-  'js/editor.js', 'js/objects.js', 'js/drawer.js', 'js/importer.js',
+  'js/editor.js', 'js/autocomplete.js', 'js/objects.js', 'js/drawer.js', 'js/importer.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png',
 ];
 const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
