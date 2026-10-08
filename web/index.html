@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>NoteTron</title>
+  <meta name="description" content="NoteTron — anotações e estudo em qualquer aparelho.">
+  <meta name="theme-color" content="#5b5bd6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="NoteTron">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Inter:wght@400;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Merriweather:wght@400;700&family=Roboto+Mono:wght@400;700&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hl-light">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hl-dark" disabled>
+  <link rel="stylesheet" href="css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<section id="auth" class="hidden">
+  <div class="auth-card">
+    <div class="brand"><img src="icons/icon.svg" alt=""><span>NoteTron</span></div>
+    <p class="muted">Anotações e estudo, em qualquer aparelho.</p>
+
+    <div id="config-warning" class="msg warn" hidden>
+      O app ainda não foi ligado ao Supabase (falta a chave pública em <code>js/config.js</code>).
+    </div>
+
+    <div id="auth-box">
+      <div class="seg wide" role="tablist">
+        <button type="button" data-auth-tab="login" class="active">Entrar</button>
+        <button type="button" data-auth-tab="signup">Criar conta</button>
+      </div>
+      <form id="auth-form" autocomplete="on">
+        <label>E-mail<input type="email" name="email" required autocomplete="email"></label>
+        <label>Senha<input type="password" name="password" required minlength="6" autocomplete="current-password"></label>
+        <button class="btn primary block" type="submit" id="auth-submit">Entrar</button>
+      </form>
+      <button type="button" class="link" id="forgot-account">Esqueci minha senha</button>
+    </div>
+    <div id="auth-msg" class="msg" hidden></div>
+
+    <div class="auth-sep"><span>ou</span></div>
+    <button type="button" class="btn ghost block" id="local-mode">Usar sem conta (só neste aparelho)</button>
+  </div>
+</section>
+
+<!-- ============ APP ============ -->
+<div id="app" class="hidden">
+  <aside id="drawer" aria-label="Gaveta">
+    <div class="drawer-head">
+      <img src="icons/icon.svg" alt="" class="logo">
+      <h2>Gaveta</h2>
+      <button class="icon-btn only-mobile" id="drawer-close" data-icon="x" title="Fechar"></button>
+    </div>
+    <div class="drawer-actions">
+      <button class="btn primary" id="new-note"><span data-icon="plus"></span>Anotação</button>
+      <button class="icon-btn bordered" id="new-folder" data-icon="folder-plus" title="Nova pasta"></button>
+      <button class="icon-btn bordered" id="import-btn" data-icon="upload" title="Importar arquivos (.md, .txt, código)"></button>
+      <input type="file" id="import-input" multiple hidden>
+    </div>
+    <button class="btn ai block owner-only hidden" id="ai-drawer"><span data-icon="sparkles"></span>Organizar Gaveta com IA</button>
+    <div class="search"><span data-icon="search"></span><input id="search" type="search" placeholder="Buscar anotações…"></div>
+    <nav id="note-list"></nav>
+    <div class="drawer-foot">
+      <span id="sync-status" class="sync"></span>
+      <span class="grow"></span>
+      <button class="icon-btn" id="theme-toggle" data-icon="moon" title="Tema claro/escuro"></button>
+      <button class="icon-btn" id="logout" data-icon="logout" title="Sair"></button>
+    </div>
+    <div class="user-line" id="user-email"></div>
+  </aside>
+  <div id="scrim"></div>
+
+  <main id="main">
+    <header id="topbar">
+      <button class="icon-btn" id="drawer-open" data-icon="menu" title="Gaveta"></button>
+      <span id="lock-badge" class="hidden" title="Anotação protegida por senha" data-icon="lock"></span>
+      <input id="title" placeholder="Título da anotação" maxlength="120" autocomplete="off" disabled>
+      <button class="btn ai sm owner-only hidden" id="ai-note" title="Pedir algo à IA"><span data-icon="sparkles"></span><span class="lbl">IA</span></button>
+      <button class="icon-btn" id="note-menu" data-icon="more" title="Mais opções" disabled></button>
+    </header>
+
+    <div id="toolbar" class="bar">
+      <div class="seg" id="mode-seg">
+        <button data-mode="text" class="active" title="Modo texto"><span data-icon="type"></span><span class="lbl">Texto</span></button>
+        <button data-mode="draw" title="Modo desenho"><span data-icon="pen"></span><span class="lbl">Desenho</span></button>
+      </div>
+
+      <div class="tb-group" id="tb-text">
+        <select id="font-family" title="Fonte">
+          <option value="">Fonte padrão</option>
+          <option value="Inter, sans-serif">Inter</option>
+          <option value="Arial, Helvetica, sans-serif">Arial</option>
+          <option value="Verdana, sans-serif">Verdana</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Times New Roman', serif">Times New Roman</option>
+          <option value="Lora, serif">Lora</option>
+          <option value="Merriweather, serif">Merriweather</option>
+          <option value="'Courier New', monospace">Courier New</option>
+          <option value="'Roboto Mono', monospace">Roboto Mono</option>
+          <option value="Caveat, cursive">Caveat (manuscrita)</option>
+        </select>
+        <select id="font-size" title="Tamanho da fonte">
+          <option value="">Tam.</option>
+          <option>12</option><option>14</option><option>16</option><option>18</option>
+          <option>20</option><option>24</option><option>28</option><option>32</option><option>40</option><option>48</option>
+        </select>
+        <label class="color-btn" title="Cor da fonte"><span data-icon="text-color"></span><i class="sw" id="font-color-sw"></i><input type="color" id="font-color" value="#e5484d"></label>
+        <label class="color-btn" title="Cor do fundo (destaque na seleção ou fundo da nota)"><span data-icon="paint"></span><i class="sw" id="bg-color-sw"></i><input type="color" id="bg-color" value="#fff59d"></label>
+        <div class="seg small" id="scope-seg" title="Fonte e cores valem para…">
+          <button data-scope="sel" class="active">Seleção</button>
+          <button data-scope="note">Nota toda</button>
+        </div>
+        <span class="tb-sep"></span>
+        <button class="icon-btn" data-cmd="bold" data-icon="bold" title="Negrito (Ctrl+B)"></button>
+        <button class="icon-btn" data-cmd="italic" data-icon="italic" title="Itálico (Ctrl+I)"></button>
+        <button class="icon-btn" data-cmd="underline" data-icon="underline" title="Sublinhado (Ctrl+U)"></button>
+        <button class="icon-btn txt" data-block="h1" title="Título">H1</button>
+        <button class="icon-btn txt" data-block="h2" title="Subtítulo">H2</button>
+        <button class="icon-btn txt" data-block="p" title="Parágrafo">¶</button>
+        <button class="icon-btn" data-cmd="insertUnorderedList" data-icon="list" title="Lista"></button>
+        <button class="icon-btn" data-cmd="insertOrderedList" data-icon="list-ordered" title="Lista numerada"></button>
+        <button class="icon-btn" id="insert-code" data-icon="code" title="Bloco de código"></button>
+        <button class="icon-btn" data-cmd="removeFormat" data-icon="clear-format" title="Limpar formatação"></button>
+      </div>
+
+      <div class="tb-group hidden" id="tb-draw">
+        <button class="icon-btn" data-tool="select" data-icon="pointer" title="Selecionar e mover"></button>
+        <button class="icon-btn active" data-tool="pen" data-icon="pen" title="Caneta"></button>
+        <button class="icon-btn" data-tool="eraser" data-icon="eraser" title="Borracha (apaga desenhos)"></button>
+        <button class="icon-btn" data-tool="line" data-icon="line" title="Linha"></button>
+        <button class="icon-btn" data-tool="arrow" data-icon="arrow" title="Seta"></button>
+        <button class="icon-btn" data-tool="shape" data-icon="shapes" title="Forma"></button>
+        <select id="shape-kind" title="Forma">
+          <option value="rect">Retângulo</option>
+          <option value="rounded">Arredondado</option>
+          <option value="ellipse">Círculo / elipse</option>
+          <option value="triangle">Triângulo</option>
+          <option value="diamond">Losango</option>
+          <option value="hexagon">Hexágono</option>
+          <option value="star">Estrela</option>
+        </select>
+        <span class="tb-sep"></span>
+        <label class="color-btn" title="Cor do traço"><i class="sw big" id="stroke-sw"></i><input type="color" id="stroke-color" value="#e5484d"></label>
+        <label class="chk" title="Preencher formas"><input type="checkbox" id="fill-on"> Preencher</label>
+        <label class="color-btn" title="Cor do preenchimento"><i class="sw big" id="fill-sw"></i><input type="color" id="fill-color" value="#ffd166"></label>
+        <select id="stroke-width" title="Espessura">
+          <option value="1">1 px</option><option value="2">2 px</option><option value="3" selected>3 px</option>
+          <option value="5">5 px</option><option value="8">8 px</option><option value="12">12 px</option><option value="20">20 px</option>
+        </select>
+      </div>
+
+      <div class="tb-group">
+        <span class="tb-sep"></span>
+        <button class="icon-btn" id="add-image" data-icon="image" title="Inserir imagem (ou cole com Ctrl+V / arraste)"></button>
+        <input type="file" id="image-input" accept="image/*" multiple hidden>
+        <button class="icon-btn" id="undo" data-icon="undo" title="Desfazer (Ctrl+Z)"></button>
+        <button class="icon-btn" id="redo" data-icon="redo" title="Refazer (Ctrl+Y)"></button>
+      </div>
+    </div>
+
+    <div id="objbar" class="bar hidden">
+      <span class="ob-label" id="ob-type">Objeto</span>
+      <div class="tb-group" title="Camada">
+        <button class="icon-btn" data-z="front" data-icon="bring-front" title="Trazer para a frente"></button>
+        <button class="icon-btn" data-z="up" data-icon="arrow-up" title="Avançar uma camada"></button>
+        <button class="icon-btn" data-z="down" data-icon="arrow-down" title="Recuar uma camada"></button>
+        <button class="icon-btn" data-z="back" data-icon="send-back" title="Enviar para trás"></button>
+        <label class="chk"><input type="checkbox" id="ob-behind"> Atrás do texto</label>
+      </div>
+      <div class="tb-group" id="ob-size">
+        <span class="tb-sep"></span>
+        <label class="num">L<input type="number" id="ob-w" min="10" max="5000"></label>
+        <label class="num">A<input type="number" id="ob-h" min="10" max="5000"></label>
+        <label class="chk"><input type="checkbox" id="ob-ratio"> Proporção</label>
+      </div>
+      <div class="tb-group" id="ob-style">
+        <span class="tb-sep"></span>
+        <label class="color-btn" title="Cor do traço"><i class="sw big" id="ob-stroke-sw"></i><input type="color" id="ob-stroke"></label>
+        <label class="chk" id="ob-fill-wrap"><input type="checkbox" id="ob-fill-on"> Preencher</label>
+        <label class="color-btn" id="ob-fill-btn" title="Preenchimento"><i class="sw big" id="ob-fill-sw"></i><input type="color" id="ob-fill"></label>
+        <select id="ob-sw" title="Espessura">
+          <option value="1">1 px</option><option value="2">2 px</option><option value="3">3 px</option>
+          <option value="5">5 px</option><option value="8">8 px</option><option value="12">12 px</option><option value="20">20 px</option>
+        </select>
+      </div>
+      <div class="tb-group" id="ob-image">
+        <span class="tb-sep"></span>
+        <select id="ob-shape" title="Forma de destaque">
+          <option value="rect">Retângulo</option>
+          <option value="rounded">Arredondado</option>
+          <option value="ellipse">Círculo / elipse</option>
+          <option value="triangle">Triângulo</option>
+          <option value="diamond">Losango</option>
+          <option value="hexagon">Hexágono</option>
+          <option value="star">Estrela</option>
+        </select>
+        <label class="chk" title="Recorta a imagem no formato da forma"><input type="checkbox" id="ob-clip"> Recortar</label>
+        <label class="chk" title="Desenha um contorno com a forma"><input type="checkbox" id="ob-frame"> Contorno</label>
+        <label class="color-btn" title="Cor do contorno"><i class="sw big" id="ob-frame-sw"></i><input type="color" id="ob-frame-color"></label>
+        <select id="ob-frame-width" title="Espessura do contorno">
+          <option value="2">2 px</option><option value="4">4 px</option><option value="6">6 px</option><option value="10">10 px</option><option value="16">16 px</option>
+        </select>
+      </div>
+      <span class="tb-sep"></span>
+      <button class="icon-btn" id="ob-dup" data-icon="copy" title="Duplicar"></button>
+      <button class="icon-btn danger" id="ob-del" data-icon="trash" title="Excluir (Delete)"></button>
+    </div>
+
+    <div id="workspace">
+      <div id="empty-state">
+        <img src="icons/icon.svg" alt="">
+        <h1>NoteTron</h1>
+        <p class="muted">Abra uma anotação na <b>Gaveta</b> ou crie uma nova.</p>
+        <button class="btn primary" id="empty-new"><span data-icon="plus"></span>Nova anotação</button>
+      </div>
+      <h1 id="print-title"></h1>
+      <div id="page" class="hidden">
+        <div id="layer-under" class="layer"></div>
+        <div id="editor" contenteditable="true" spellcheck="true" data-placeholder="Comece a escrever…"></div>
+        <div id="layer-over" class="layer"></div>
+        <div id="draw-surface"></div>
+        <div id="selection" class="hidden">
+          <i class="h" data-h="nw"></i><i class="h" data-h="ne"></i><i class="h" data-h="sw"></i><i class="h" data-h="se"></i>
+          <i class="h" data-h="p0"></i><i class="h" data-h="p1"></i>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+</body>
+</html>
