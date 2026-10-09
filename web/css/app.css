@@ -130,6 +130,10 @@ textarea { resize: vertical; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
 .brand img { width: 40px; height: 40px; }
 .auth-card > .muted { margin: 4px 0 18px; }
+.google-btn { height: 42px; gap: 10px; background: #fff; color: #1f1f1f; border-color: #dadce0; font-weight: 600; }
+.google-btn:hover { background: #f8f9fa; }
+:root[data-theme="dark"] .google-btn { background: #131314; color: #e3e3e3; border-color: #8e918f; }
+:root[data-theme="dark"] .google-btn:hover { background: #1f1f20; }
 .auth-sep { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 16px 0 12px; }
 .auth-sep::before, .auth-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 

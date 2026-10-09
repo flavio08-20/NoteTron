@@ -61,6 +61,13 @@ async function boot() {
   }
   if (localStorage.getItem('nt_local_mode') === '1') return enterApp('local', { id: 'local', email: 'Somente neste aparelho' });
   showAuth();
+  // erro devolvido pelo Google/Supabase na volta do login social
+  const params = new URLSearchParams(location.search + '&' + location.hash.slice(1));
+  const oauthErr = params.get('error_description') || params.get('error');
+  if (oauthErr) {
+    authMsg(/access_denied/i.test(oauthErr) ? 'Login com Google cancelado.' : 'Não foi possível entrar com o Google: ' + oauthErr.replace(/\+/g, ' '), 'err');
+    history.replaceState(null, '', appUrl());
+  }
 }
 
 function registerSW() {
@@ -122,6 +129,27 @@ function bindAuth() {
       },
     });
     if (r) authMsg('Se existir uma conta com esse e-mail, o link foi enviado.', 'ok');
+  };
+
+  // Login com Google (OAuth pelo Supabase): sai para a página do Google e volta logado
+  $('#google-login').onclick = async () => {
+    if (!sb) return authMsg('O app ainda não está ligado ao servidor.', 'err');
+    const btn = $('#google-login');
+    btn.disabled = true;
+    authMsg('');
+    try {
+      // confere antes se o Google foi ativado no Supabase (senão o Google mostraria uma página de erro)
+      const s = await fetch(`${SUPABASE_URL}/auth/v1/settings`, { headers: { apikey: SUPABASE_ANON_KEY } }).then(r => r.json());
+      if (!s.external?.google) throw new Error('O login com Google ainda não foi ativado no servidor.');
+      const { error } = await sb.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: appUrl(), queryParams: { prompt: 'select_account' } },
+      });
+      if (error) throw error;
+    } catch (err) {
+      authMsg(translateAuth(err.message), 'err');
+      btn.disabled = false;
+    }
   };
 
   $('#local-mode').onclick = () => {

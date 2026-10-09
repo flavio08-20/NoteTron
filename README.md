@@ -52,6 +52,16 @@ Em **Painel → Project Settings → API**, copie a chave **anon / publishable**
   - **Magic Link**: assunto `Seu código do NoteTron`, corpo `supabase/templates/magic-link.html` (troca/recuperação de senha das anotações).
 - **Authentication → Providers → Email**: deixe **Confirm email** ligado (sem confirmar, a conta não entra).
 
+### Login com Google (opcional)
+1. No **Google Cloud Console** (console.cloud.google.com), crie ou escolha um projeto e vá em **APIs e serviços → Tela de consentimento OAuth**. Configure como **Externo**, com nome do app, e-mail de suporte e domínio.
+2. Em **Credenciais → Criar credenciais → ID do cliente OAuth → Aplicativo da Web**:
+   - **Origens JavaScript autorizadas:** os endereços do app (ex.: `https://notetron.pages.dev`, `http://localhost:5173`).
+   - **URIs de redirecionamento autorizados:** `https://urzqfpktczpfeyupdasm.supabase.co/auth/v1/callback`
+3. Copie o **ID do cliente** e a **Chave secreta do cliente**.
+4. No Supabase, em **Authentication → Sign In / Providers → Google**, ative, cole os dois valores e salve.
+
+Quem entrar com o Google usando o mesmo e-mail de uma conta existente cai na mesma conta (mesmas anotações e mesmo acesso à IA).
+
 ### 6. Hospedagem
 Publique a pasta `web/` em qualquer hospedagem estática com HTTPS, como Netlify, Vercel, Cloudflare Pages ou GitHub Pages.
 
