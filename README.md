@@ -33,7 +33,7 @@ Configure em **Painel → Edge Functions → Secrets**:
 |---|---|
 | `OPENAI_API_KEY` | sua chave da OpenAI (nunca coloque no código do app) |
 | `RECOVERY_SECRET` | texto aleatório longo, gerado pelo comando abaixo |
-| `OPENAI_MODEL` | opcional; o padrão é `gpt-4.1-mini` |
+| `OPENAI_MODEL` | opcional; o padrão é `gpt-4o-mini` |
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"

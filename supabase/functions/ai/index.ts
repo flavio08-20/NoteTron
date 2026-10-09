@@ -2,11 +2,11 @@
 // Por enquanto liberada só para o dono (OWNER_EMAIL).
 //
 // Secrets necessários: OPENAI_API_KEY
-// Opcionais: OWNER_EMAIL (padrão abaixo), OPENAI_MODEL (padrão gpt-4.1-mini)
+// Opcionais: OWNER_EMAIL (padrão abaixo), OPENAI_MODEL (padrão gpt-4o-mini)
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const OWNER = (Deno.env.get("OWNER_EMAIL") ?? "flaviobertolotticorp@gmail.com").toLowerCase();
-const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
+const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
