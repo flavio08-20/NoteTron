@@ -1,4 +1,5 @@
-// Edge Function "note-key": recuperação por e-mail da senha das anotações.
+// Edge Function "note-key": recuperação por e-mail da senha das anotações e das pastas.
+// Recebe note_id (anotação) ou folder_id (pasta).
 //
 // escrow  → guarda a chave da anotação cifrada com RECOVERY_SECRET (segredo só do servidor)
 // recover → devolve a chave, SOMENTE se o login atual foi confirmado por e-mail (OTP/link)
@@ -47,19 +48,26 @@ Deno.serve(async (req) => {
     const { data: { user } } = await admin.auth.getUser(jwt);
     if (!user) return json({ error: "Não autenticado" }, 401);
 
-    const { action, note_id, dek } = await req.json();
-    if (typeof note_id !== "string" || !UUID.test(note_id)) return json({ error: "note_id inválido" }, 400);
+    const { action, note_id, folder_id, dek } = await req.json();
+    // alvo: anotação (note_id) ou pasta (folder_id)
+    const isFolder = typeof folder_id === "string";
+    const id = isFolder ? folder_id : note_id;
+    if (typeof id !== "string" || !UUID.test(id)) return json({ error: "id inválido" }, 400);
+    const ownerTable = isFolder ? "folders" : "notes";
+    const recTable = isFolder ? "folder_recovery" : "note_recovery";
+    const idCol = isFolder ? "folder_id" : "note_id";
+    const keyId = isFolder ? `folder:${id}` : id;
 
-    const { data: note } = await admin.from("notes").select("id,user_id").eq("id", note_id).maybeSingle();
-    if (!note || note.user_id !== user.id) return json({ error: "Anotação não encontrada" }, 404);
+    const { data: owner } = await admin.from(ownerTable).select("id,user_id").eq("id", id).maybeSingle();
+    if (!owner || owner.user_id !== user.id) return json({ error: isFolder ? "Pasta não encontrada" : "Anotação não encontrada" }, 404);
 
     if (action === "escrow") {
       const raw = fromB64(String(dek ?? ""));
       if (raw.length !== 32) return json({ error: "Chave inválida" }, 400);
       const iv = crypto.getRandomValues(new Uint8Array(12));
-      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await keyFor(note_id), raw));
-      const { error } = await admin.from("note_recovery")
-        .upsert({ note_id, user_id: user.id, iv: toB64(iv), ct: toB64(ct) });
+      const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await keyFor(keyId), raw));
+      const { error } = await admin.from(recTable)
+        .upsert({ [idCol]: id, user_id: user.id, iv: toB64(iv), ct: toB64(ct) });
       if (error) throw error;
       return json({ ok: true });
     }
@@ -70,17 +78,17 @@ Deno.serve(async (req) => {
       const now = Date.now() / 1000;
       const viaEmail = amr.some((a) => ["otp", "magiclink"].includes(a.method) && now - a.timestamp < 15 * 60);
       if (!viaEmail) return json({ error: "Confirme pelo link enviado ao seu e-mail antes de continuar." }, 403);
-      const { data: rec } = await admin.from("note_recovery").select("iv,ct")
-        .eq("note_id", note_id).eq("user_id", user.id).maybeSingle();
-      if (!rec) return json({ error: "Esta anotação não tem recuperação por e-mail ativa." }, 404);
+      const { data: rec } = await admin.from(recTable).select("iv,ct")
+        .eq(idCol, id).eq("user_id", user.id).maybeSingle();
+      if (!rec) return json({ error: isFolder ? "Esta pasta não tem recuperação por e-mail ativa." : "Esta anotação não tem recuperação por e-mail ativa." }, 404);
       const raw = new Uint8Array(await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv: fromB64(rec.iv) }, await keyFor(note_id), fromB64(rec.ct),
+        { name: "AES-GCM", iv: fromB64(rec.iv) }, await keyFor(keyId), fromB64(rec.ct),
       ));
       return json({ dek: toB64(raw) });
     }
 
     if (action === "forget") {
-      await admin.from("note_recovery").delete().eq("note_id", note_id).eq("user_id", user.id);
+      await admin.from(recTable).delete().eq(idCol, id).eq("user_id", user.id);
       return json({ ok: true });
     }
 

@@ -148,7 +148,7 @@ async function doPush() {
     for (const n of [...notes.values()].filter(n => n.dirty)) {
       const rev = n.rev;
       const row = pick(n, NOTE_COLS);
-      if (n.hasContent) { row.content = n.locked ? null : n.content; row.enc = n.locked ? n.enc : null; }
+      if (n.hasContent) { row.content = n.enc ? null : n.content; row.enc = n.enc || null; }
       let { error } = await sb.from('notes').upsert(row);
       if (error && error.code === '23503' && row.folder_id) { // pasta apagada em outro aparelho
         n.folder_id = row.folder_id = null;

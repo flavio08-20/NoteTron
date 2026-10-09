@@ -283,6 +283,8 @@ function folderMenu(id, anchor) {
     return menu(anchor, [
       { label: 'Abrir pasta', icon: 'unlock', onClick: () => unlockFolder(id) },
       { label: 'Esqueci a senha da pasta', icon: 'key', onClick: () => startEmailCheck({ kind: 'folder', id }) },
+      '-',
+      { label: 'Excluir pasta', icon: 'trash', danger: true, onClick: () => deleteFolder(id) },
     ]);
   }
   menu(anchor, [
@@ -291,7 +293,7 @@ function folderMenu(id, anchor) {
     { label: 'Baixar como ZIP (PDFs)', icon: 'download', onClick: () => downloadFolderZip(id) },
     '-',
     f.lock
-      ? { label: 'Trancar agora', icon: 'lock', onClick: () => { unlockedFolders.delete(id); refreshDrawer(); closeIfInFolder(id); } }
+      ? { label: 'Trancar agora', icon: 'lock', onClick: () => lockFolderNow(id) }
       : { label: 'Proteger pasta com senha', icon: 'lock', onClick: () => setFolderPassword(id) },
     f.lock ? { label: 'Alterar ou remover senha', icon: 'key', onClick: () => changeFolderPassword(id) } : null,
     '-',
@@ -299,18 +301,108 @@ function folderMenu(id, anchor) {
   ]);
 }
 
-// ---------- senha de pasta ----------
-// Trava de acesso: a pasta fica fechada (conteúdo e títulos escondidos) até digitar a senha.
-// Guarda só um verificador PBKDF2 no servidor. Não criptografa as anotações de dentro.
-const unlockedFolders = new Set();
+// ---------- senha de pasta (criptografia) ----------
+// Cada pasta com senha tem uma chave aleatória (AES-256) cifrada pela senha (folder.lock).
+// As anotações de dentro são cifradas no aparelho: a chave de cada anotação fica cifrada
+// pela chave da pasta (note.enc.fkey). Anotações com senha própria continuam com a delas.
+const folderKeys = new Map(); // pastas destrancadas nesta sessão → chave da pasta
 function isFolderLocked(id) {
   const f = store.folders.get(id);
-  return !!(f?.lock && !unlockedFolders.has(id));
+  return !!(f?.lock && !folderKeys.has(id));
+}
+const isFolderEncrypted = n => !!n.enc?.fkey;
+const notesIn = id => [...store.notes.values()].filter(n => n.folder_id === id);
+const onlineForCrypto = () => !(mode === 'offline' || (mode === 'cloud' && !navigator.onLine));
+
+async function escrowKey(kind, id, key) {
+  if (mode !== 'cloud') return;
+  try {
+    await store.push();
+    await callFn('note-key', { action: 'escrow', [kind === 'folder' ? 'folder_id' : 'note_id']: id, dek: cx.toB64(key) });
+  } catch (e) {
+    toast('Atenção: a recuperação por e-mail não ficou ativa (' + e.message + ').', 'err', 7000);
+  }
+}
+
+// cifra uma anotação (sem senha própria) com a chave da pasta
+async function encryptForFolder(n, fk, fid) {
+  if (!n.hasContent) await store.loadContent(n.id);
+  if (n.enc) return; // já cifrada (senha própria ou outra pasta)
+  const content = n.content || emptyContent();
+  const dek = cx.newDEK();
+  n.enc = { folder: fid, fkey: await cx.wrapWithKey(fk, dek), ...await cx.encryptContent(dek, content) };
+  n.content = null;
+  n.search_text = '';
+  n.hasContent = true;
+  deks.set(n.id, dek);
+}
+
+// volta uma anotação cifrada pela pasta para texto aberto
+async function decryptFromFolder(n, fk) {
+  if (!n.hasContent) await store.loadContent(n.id);
+  if (!isFolderEncrypted(n)) return;
+  const dek = await cx.unwrapWithKey(fk, n.enc.fkey);
+  const content = await cx.decryptContent(dek, n.enc);
+  Object.assign(n, { enc: null, content, search_text: plainFromHTML(content.html).slice(0, 4000), hasContent: true });
+  deks.delete(n.id);
+}
+
+async function folderKeyFor(fid) {
+  if (!fid) return null;
+  if (folderKeys.has(fid)) return folderKeys.get(fid);
+  return (await unlockFolder(fid)) ? folderKeys.get(fid) : null;
+}
+
+/** Chave da anotação (pela pasta, pela senha própria ou do cache da sessão). */
+async function getNoteDEK(n) {
+  if (deks.has(n.id)) return deks.get(n.id);
+  if (isFolderEncrypted(n)) {
+    const fk = await folderKeyFor(n.enc.folder || n.folder_id);
+    if (!fk) return null;
+    const dek = await cx.unwrapWithKey(fk, n.enc.fkey);
+    deks.set(n.id, dek);
+    return dek;
+  }
+  if (n.locked) {
+    const dek = await askNotePassword(n);
+    if (dek) deks.set(n.id, dek);
+    return dek;
+  }
+  return null;
+}
+
+/** Move a anotação entre pastas, cifrando/decifrando conforme a pasta de destino. */
+async function relocateNote(n, toId) {
+  toId = toId || null;
+  if ((n.folder_id || null) === toId) return true;
+  if (current?.id === n.id) await flushSave();
+  try { await store.loadContent(n.id); } catch (e) { toast(e.message, 'err'); return false; }
+  const dest = toId && store.folders.get(toId);
+  if (!n.locked) { // anotações com senha própria não mudam
+    if (isFolderEncrypted(n)) {
+      const fk = await folderKeyFor(n.enc.folder || n.folder_id);
+      if (!fk) return false;
+      if (dest?.lock) {
+        const fk2 = await folderKeyFor(toId);
+        if (!fk2) return false;
+        const dek = await cx.unwrapWithKey(fk, n.enc.fkey);
+        n.enc = { ...n.enc, folder: toId, fkey: await cx.wrapWithKey(fk2, dek) };
+      } else await decryptFromFolder(n, fk);
+    } else if (dest?.lock) {
+      const fk2 = await folderKeyFor(toId);
+      if (!fk2) return false;
+      await encryptForFolder(n, fk2, toId);
+    }
+  }
+  n.folder_id = toId;
+  await store.saveNote(n, { touch: false });
+  return true;
 }
 
 async function unlockFolder(id) {
   const f = store.folders.get(id);
   if (!f || !isFolderLocked(id)) return true;
+  let fk = null, legacyPw = null;
   const r = await modal({
     title: f.name,
     body: `<p class="muted">${icon('lock')} Esta pasta é protegida por senha.</p>
@@ -320,15 +412,65 @@ async function unlockFolder(id) {
     init: (dlg, finish) => { dlg.querySelector('[data-forgot]').onclick = () => finish({ value: 'forgot' }); },
     validate: async (v, d) => {
       if (!d.pw) return 'Digite a senha.';
-      if (!await cx.checkVerifier(f.lock, d.pw)) return 'Senha incorreta.';
+      if (f.lock.hash) { // pasta protegida pela versão antiga (só trava): converte na abertura
+        if (!await cx.checkVerifier(f.lock, d.pw)) return 'Senha incorreta.';
+        legacyPw = d.pw;
+        return;
+      }
+      try { fk = await cx.unwrapDEK(f.lock, d.pw); } catch { return 'Senha incorreta.'; }
     },
   });
   if (r?.value === 'forgot') { startEmailCheck({ kind: 'folder', id }); return false; }
   if (!r) return false;
-  unlockedFolders.add(id);
+  if (legacyPw) {
+    const t = busyToast('Criptografando as anotações da pasta…');
+    try { fk = await encryptFolder(id, legacyPw); } catch (e) { toast('Não foi possível criptografar: ' + e.message, 'err', 6000); return false; }
+    finally { t.close(); }
+  }
+  folderKeys.set(id, fk);
   collapsed.delete(id);
   refreshDrawer();
   return true;
+}
+
+// cria a chave da pasta, cifra as anotações de dentro e salva a senha
+async function encryptFolder(id, pw) {
+  const f = store.folders.get(id);
+  const list = notesIn(id);
+  for (const n of list) await store.loadContent(n.id); // garante tudo baixado antes de mudar algo
+  if (list.some(n => current?.id === n.id)) await flushSave();
+  const fk = cx.newDEK();
+  for (const n of list) {
+    if (n.locked) continue;
+    await encryptForFolder(n, fk, id);
+    await store.saveNote(n, { touch: false });
+  }
+  f.lock = await cx.wrapDEK(fk, pw);
+  await store.saveFolder(f);
+  await escrowKey('folder', id, fk);
+  return fk;
+}
+
+// decifra as anotações de dentro e tira a senha da pasta
+async function decryptFolder(id, fk) {
+  const f = store.folders.get(id);
+  if (notesIn(id).some(n => current?.id === n.id)) await flushSave();
+  for (const n of notesIn(id)) {
+    if (!isFolderEncrypted(n)) continue;
+    await decryptFromFolder(n, fk);
+    await store.saveNote(n, { touch: false });
+  }
+  f.lock = null;
+  folderKeys.delete(id);
+  await store.saveFolder(f);
+  if (mode === 'cloud') callFn('note-key', { action: 'forget', folder_id: id }).catch(() => {});
+}
+
+function lockFolderNow(id) {
+  folderKeys.delete(id);
+  for (const n of notesIn(id)) if (isFolderEncrypted(n)) deks.delete(n.id);
+  closeIfInFolder(id);
+  refreshDrawer();
 }
 
 function closeIfInFolder(id) {
@@ -343,25 +485,30 @@ const checkPw = d => {
 };
 
 async function setFolderPassword(id) {
+  if (!onlineForCrypto()) return toast('Conecte-se à internet para proteger uma pasta.', 'err');
   const f = store.folders.get(id);
   const r = await modal({
     title: 'Proteger pasta com senha',
-    body: `<p class="muted">A pasta “${esc(f.name)}” ficará fechada: as anotações de dentro só aparecem depois de digitar a senha.</p>
+    body: `<p class="muted">As anotações de “${esc(f.name)}” serão <b>criptografadas</b> no seu aparelho (texto, imagens e desenhos). Anotações que entrarem depois também serão.</p>
       ${folderPwFields}
-      <p class="hint">Esqueceu? Dá para redefinir por um código enviado ao seu e-mail. Para proteger o conteúdo com criptografia, use também a senha da própria anotação.</p>`,
+      <p class="hint">${mode === 'cloud' ? 'Esqueceu? Dá para redefinir por um código enviado ao seu e-mail.' : '<b>Sem conta, não há como recuperar a senha.</b>'} O nome da pasta e os títulos das anotações continuam sem criptografia.</p>`,
     buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Proteger', value: 'ok', primary: true }],
     validate: (v, d) => checkPw(d),
   });
   if (!r) return;
-  f.lock = await cx.makeVerifier(r.data.pw);
-  unlockedFolders.delete(id);
-  await store.saveFolder(f);
-  closeIfInFolder(id);
-  toast('Pasta protegida.');
+  const t = busyToast('Criptografando as anotações da pasta…');
+  try {
+    await encryptFolder(id, r.data.pw);
+    lockFolderNow(id);
+    toast('Pasta protegida e criptografada.');
+  } catch (e) {
+    toast('Não foi possível proteger a pasta: ' + e.message, 'err', 6000);
+  } finally { t.close(); }
 }
 
 async function changeFolderPassword(id) {
   const f = store.folders.get(id);
+  let fk = null;
   const r = await modal({
     title: `Senha da pasta “${f.name}”`,
     body: `<label>Senha atual<input type="password" name="cur" autocomplete="current-password"></label>
@@ -371,21 +518,43 @@ async function changeFolderPassword(id) {
     buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Salvar', value: 'ok', primary: true }],
     init: (dlg, finish) => { dlg.querySelector('[data-forgot]').onclick = () => finish({ value: 'forgot' }); },
     validate: async (v, d) => {
-      if (!await cx.checkVerifier(f.lock, d.cur)) return 'Senha atual incorreta.';
+      try { fk = await cx.unwrapDEK(f.lock, d.cur); } catch { return 'Senha atual incorreta.'; }
       if (d.pw || d.pw2) return checkPw(d);
     },
   });
   if (r?.value === 'forgot') return startEmailCheck({ kind: 'folder', id });
   if (!r) return;
-  f.lock = r.data.pw ? await cx.makeVerifier(r.data.pw) : null;
-  await store.saveFolder(f);
-  toast(f.lock ? 'Senha da pasta alterada.' : 'Proteção da pasta removida.');
+  await applyFolderPassword(id, fk, r.data.pw || null);
+}
+
+// nova senha → recifra só a chave da pasta; sem senha → decifra as anotações
+async function applyFolderPassword(id, fk, newPw) {
+  const f = store.folders.get(id);
+  const t = busyToast(newPw ? 'Salvando a nova senha…' : 'Removendo a criptografia da pasta…');
+  try {
+    if (newPw) {
+      f.lock = await cx.wrapDEK(fk, newPw);
+      folderKeys.set(id, fk);
+      await store.saveFolder(f);
+      toast('Senha da pasta alterada.');
+    } else {
+      await decryptFolder(id, fk);
+      toast('Proteção da pasta removida.');
+    }
+  } catch (e) {
+    toast('Não foi possível concluir: ' + e.message, 'err', 6000);
+  } finally { t.close(); refreshDrawer(); }
 }
 
 async function finishFolderRecovery(id) {
   localStorage.removeItem('nt_recover');
   const f = store.folders.get(id);
   if (!f) return toast('Pasta não encontrada.', 'err');
+  let fk = null;
+  if (!f.lock?.hash) { // versão antiga não tinha chave guardada
+    try { fk = cx.fromB64((await callFn('note-key', { action: 'recover', folder_id: id })).dek); }
+    catch (e) { return toast('Não foi possível recuperar: ' + e.message, 'err', 6000); }
+  }
   const r = await modal({
     title: 'E-mail confirmado',
     body: `<p>Defina uma nova senha para a pasta “${esc(f.name)}” ou remova a proteção.</p>${folderPwFields}`,
@@ -393,10 +562,19 @@ async function finishFolderRecovery(id) {
     validate: (v, d) => (v === 'save' ? checkPw(d) : undefined),
   });
   if (!r) return;
-  f.lock = r.value === 'save' ? await cx.makeVerifier(r.data.pw) : null;
-  unlockedFolders.add(id);
-  await store.saveFolder(f);
-  toast(f.lock ? 'Senha da pasta alterada.' : 'Proteção da pasta removida.');
+  if (!fk) { // pasta da versão antiga: as anotações ainda não estavam cifradas
+    if (r.value === 'save') {
+      const k = await encryptFolder(id, r.data.pw);
+      folderKeys.set(id, k);
+      toast('Senha da pasta alterada e anotações criptografadas.');
+    } else {
+      f.lock = null;
+      await store.saveFolder(f);
+      toast('Proteção da pasta removida.');
+    }
+    return refreshDrawer();
+  }
+  await applyFolderPassword(id, fk, r.value === 'save' ? r.data.pw : null);
 }
 
 // ---------- baixar pasta como ZIP de PDFs ----------
@@ -418,14 +596,9 @@ const safeName = s => (s || 'Sem título').replace(/[\\/:*?"<>|]+/g, '-').replac
 
 async function noteContentFor(n) {
   await store.loadContent(n.id);
-  if (!n.locked) return n.content || emptyContent();
-  let dek = deks.get(n.id);
-  if (!dek) {
-    dek = await askNotePassword(n);
-    if (!dek) return null;
-    deks.set(n.id, dek);
-  }
-  return cx.decryptContent(dek, n.enc);
+  if (!n.enc) return n.content || emptyContent();
+  const dek = await getNoteDEK(n);
+  return dek ? cx.decryptContent(dek, n.enc) : null;
 }
 
 async function downloadFolderZip(id) {
@@ -534,9 +707,15 @@ async function renameFolder(id) {
 async function deleteFolder(id) {
   if (!await unlockFolder(id)) return;
   const f = store.folders.get(id);
-  if (await confirmDialog('Excluir pasta', `Excluir a pasta “${f.name}”? As anotações dela não são apagadas, vão para “Sem pasta”.`, 'Excluir', true)) {
-    await store.deleteFolder(id);
+  if (!await confirmDialog('Excluir pasta', `Excluir a pasta “${f.name}”? As anotações dela não são apagadas, vão para “Sem pasta”${f.lock ? ' (e deixam de ser criptografadas pela pasta)' : ''}.`, 'Excluir', true)) return;
+  // sem a pasta não haveria como decifrar: as anotações voltam a ser texto aberto antes
+  if (f.lock) {
+    const t = busyToast('Removendo a criptografia das anotações…');
+    try { await decryptFolder(id, folderKeys.get(id)); }
+    catch (e) { return toast('Não foi possível excluir: ' + e.message, 'err', 6000); }
+    finally { t.close(); }
   }
+  await store.deleteFolder(id);
 }
 
 async function renameNote(id) {
@@ -555,9 +734,8 @@ async function renameNote(id) {
 
 async function moveNote(id, folderId) {
   const n = store.notes.get(id);
-  if (!n || n.folder_id === folderId) return;
-  n.folder_id = folderId;
-  await store.saveNote(n, { touch: false });
+  if (!n || (n.folder_id || null) === (folderId || null)) return;
+  if (await relocateNote(n, folderId) && store.folders.get(folderId)?.lock && !n.locked) toast('Anotação criptografada pela pasta.');
 }
 
 async function moveNoteDialog(id) {
@@ -622,6 +800,13 @@ async function createNote({ title, folder_id = null, password = null, content = 
   } else {
     n.content = content;
     n.search_text = plainFromHTML(content.html).slice(0, 4000);
+    // criada dentro de pasta com senha: já nasce criptografada pela pasta
+    const dest = folder_id && store.folders.get(folder_id);
+    if (dest?.lock) {
+      const fk = await folderKeyFor(folder_id);
+      if (fk) await encryptForFolder(n, fk, folder_id);
+      else n.folder_id = null;
+    }
     await store.saveNote(n);
   }
   if (open) { await openNote(n.id); ed.focus(); }
@@ -637,13 +822,10 @@ async function openNote(id) {
   if (n.folder_id && isFolderLocked(n.folder_id) && !await unlockFolder(n.folder_id)) return;
   try { await store.loadContent(id); } catch (e) { return toast(e.message, 'err', 5000); }
   let content;
-  if (n.locked) {
-    let dek = deks.get(id);
-    if (!dek) {
-      dek = await askNotePassword(n);
-      if (!dek) return;
-    }
-    try { content = await cx.decryptContent(dek, n.enc); deks.set(id, dek); }
+  if (n.enc) {
+    const dek = await getNoteDEK(n);
+    if (!dek) return;
+    try { content = await cx.decryptContent(dek, n.enc); }
     catch { deks.delete(id); return toast('Não foi possível abrir: senha ou dados inválidos.', 'err'); }
   } else content = n.content || emptyContent();
   current = n;
@@ -691,7 +873,7 @@ async function saveCurrent() {
   const n = current;
   const content = { v: 1, html: ed.getHTML(), style: noteStyle, objects: ob.getObjects() };
   n.title = $('#title').value.trim() || 'Sem título';
-  if (n.locked) {
+  if (n.enc) {
     const dek = deks.get(n.id);
     if (!dek) return;
     Object.assign(n.enc, await cx.encryptContent(dek, content));
@@ -713,7 +895,7 @@ store.on('remote', async ids => {
   if (!fresh) { toast('Esta anotação foi excluída em outro aparelho.'); current = null; return showEmpty(); }
   try {
     await store.loadContent(fresh.id);
-    const content = fresh.locked ? await cx.decryptContent(deks.get(fresh.id), fresh.enc) : fresh.content;
+    const content = fresh.enc ? await cx.decryptContent(deks.get(fresh.id), fresh.enc) : fresh.content;
     const top = $('#workspace').scrollTop;
     current = fresh;
     loadIntoEditor(content || emptyContent());
@@ -773,8 +955,15 @@ async function setPasswordDialog(id) {
   });
   if (!r) return;
   try { await store.loadContent(id); } catch (e) { return toast(e.message, 'err'); }
+  // se estava cifrada pela pasta, decifra antes de passar a usar a senha própria
+  let content = n.content || emptyContent();
+  if (n.enc) {
+    const old = await getNoteDEK(n);
+    if (!old) return;
+    content = await cx.decryptContent(old, n.enc);
+  }
   const dek = cx.newDEK();
-  n.enc = { ...await cx.wrapDEK(dek, r.data.pw), ...await cx.encryptContent(dek, n.content || emptyContent()) };
+  n.enc = { ...await cx.wrapDEK(dek, r.data.pw), ...await cx.encryptContent(dek, content) };
   n.locked = true;
   n.content = null;
   n.search_text = '';
@@ -898,8 +1087,13 @@ async function finishRecovery(noteId) {
     });
     if (!r) return;
     if (r.value === 'remove') {
+      // dentro de pasta com senha, ela volta a ser cifrada pela pasta (e não texto aberto)
+      const inLocked = n.folder_id && store.folders.get(n.folder_id)?.lock;
+      const fk = inLocked ? await folderKeyFor(n.folder_id) : null;
+      if (inLocked && !fk) return;
       Object.assign(n, { locked: false, enc: null, content, search_text: plainFromHTML(content.html).slice(0, 4000) });
       deks.delete(noteId);
+      if (fk) await encryptForFolder(n, fk, n.folder_id);
       await store.saveNote(n);
       await store.push();
       callFn('note-key', { action: 'forget', note_id: noteId }).catch(() => {});
@@ -1095,12 +1289,13 @@ async function aiDrawerDialog() {
       folderId = f.id;
     }
     const newTitle = ok.data.titles && x.title?.trim() ? x.title.trim().slice(0, 120) : n.title;
-    if (n.folder_id !== folderId || n.title !== newTitle) {
-      n.folder_id = folderId;
+    if (n.title !== newTitle) {
       n.title = newTitle;
       if (current?.id === n.id) $('#title').value = newTitle;
       await store.saveNote(n, { touch: false });
     }
+    // mover cifra/decifra se a pasta de origem ou destino tiver senha
+    if ((n.folder_id || null) !== folderId) await relocateNote(n, folderId);
   }
   if (ok.data.cleanup) {
     for (const f of [...store.folders.values()]) {

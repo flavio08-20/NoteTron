@@ -67,3 +67,13 @@ export async function checkVerifier(lock, pw) {
   const h = toB64(await pbkdf2Bits(pw, fromB64(lock.salt), lock.iter));
   return h === lock.hash;
 }
+
+// ---------- chave cifrada por outra chave (DEK da anotação ← chave da pasta) ----------
+export async function wrapWithKey(kek, raw) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await dataKey(kek), raw);
+  return { iv: toB64(iv), ct: toB64(new Uint8Array(ct)) };
+}
+export async function unwrapWithKey(kek, w) {
+  return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(w.iv) }, await dataKey(kek), fromB64(w.ct)));
+}
