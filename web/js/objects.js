@@ -152,6 +152,18 @@ export function render() {
   updateHeight();
 }
 
+/** Desenha uma lista de objetos em outras camadas (usado na geração de PDF). Retorna a borda inferior. */
+export function renderInto(list, underEl, overEl) {
+  let bottom = 0;
+  for (const o of [...list].sort((a, b) => a.z - b.z)) {
+    (o.behind ? underEl : overEl).append(makeEl(o));
+    const b = bbox(o);
+    bottom = Math.max(bottom, b.y + b.h);
+  }
+  underEl.parentElement.style.minHeight = bottom + 40 + 'px';
+  return bottom;
+}
+
 export function updateHeight() {
   if (!page) return;
   let bottom = 0;

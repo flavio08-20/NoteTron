@@ -14,7 +14,7 @@ let sb = null, listenersOn = false, pushP = null, pushTimer = null;
 const now = () => new Date().toISOString();
 const pick = (o, keys) => Object.fromEntries(keys.filter(k => k in o).map(k => [k, o[k]]));
 const NOTE_COLS = ['id', 'title', 'folder_id', 'locked', 'search_text', 'created_at', 'updated_at'];
-const FOLDER_COLS = ['id', 'name', 'created_at', 'updated_at'];
+const FOLDER_COLS = ['id', 'name', 'lock', 'created_at', 'updated_at'];
 
 function setStatus(s, err) {
   status = s;

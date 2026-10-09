@@ -221,7 +221,7 @@ async function enterApp(m, u) {
   refreshDrawer();
   const last = localStorage.getItem('nt_last_note_' + u.id);
   const n = last && store.notes.get(last);
-  if (n && !n.locked) openNote(last);
+  if (n && !n.locked && !(n.folder_id && isFolderLocked(n.folder_id))) openNote(last);
   checkPendingRecovery();
 }
 
@@ -242,10 +242,12 @@ function refreshDrawer() {
     activeId: current?.id,
     query: $('#search').value,
     collapsed,
+    isLocked: isFolderLocked,
   }, {
     open: id => openNote(id),
     noteMenu: (id, anchor) => noteMenu(id, anchor),
     folderMenu: (id, anchor) => folderMenu(id, anchor),
+    unlockFolder: id => unlockFolder(id),
     toggleFolder: id => {
       collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
       localStorage.setItem('nt_collapsed', JSON.stringify([...collapsed]));
@@ -275,12 +277,237 @@ function noteMenu(id, anchor) {
 }
 
 function folderMenu(id, anchor) {
+  const f = store.folders.get(id);
+  if (!f) return;
+  if (isFolderLocked(id)) {
+    return menu(anchor, [
+      { label: 'Abrir pasta', icon: 'unlock', onClick: () => unlockFolder(id) },
+      { label: 'Esqueci a senha da pasta', icon: 'key', onClick: () => startEmailCheck({ kind: 'folder', id }) },
+    ]);
+  }
   menu(anchor, [
     { label: 'Nova anotação aqui', icon: 'plus', onClick: () => newNoteDialog({ folder_id: id }) },
     { label: 'Renomear pasta', icon: 'edit', onClick: () => renameFolder(id) },
+    { label: 'Baixar como ZIP (PDFs)', icon: 'download', onClick: () => downloadFolderZip(id) },
+    '-',
+    f.lock
+      ? { label: 'Trancar agora', icon: 'lock', onClick: () => { unlockedFolders.delete(id); refreshDrawer(); closeIfInFolder(id); } }
+      : { label: 'Proteger pasta com senha', icon: 'lock', onClick: () => setFolderPassword(id) },
+    f.lock ? { label: 'Alterar ou remover senha', icon: 'key', onClick: () => changeFolderPassword(id) } : null,
     '-',
     { label: 'Excluir pasta', icon: 'trash', danger: true, onClick: () => deleteFolder(id) },
   ]);
+}
+
+// ---------- senha de pasta ----------
+// Trava de acesso: a pasta fica fechada (conteúdo e títulos escondidos) até digitar a senha.
+// Guarda só um verificador PBKDF2 no servidor. Não criptografa as anotações de dentro.
+const unlockedFolders = new Set();
+function isFolderLocked(id) {
+  const f = store.folders.get(id);
+  return !!(f?.lock && !unlockedFolders.has(id));
+}
+
+async function unlockFolder(id) {
+  const f = store.folders.get(id);
+  if (!f || !isFolderLocked(id)) return true;
+  const r = await modal({
+    title: f.name,
+    body: `<p class="muted">${icon('lock')} Esta pasta é protegida por senha.</p>
+      <label>Senha da pasta<input type="password" name="pw" autocomplete="off"></label>
+      <button type="button" class="link" data-forgot style="justify-self:start">Esqueci a senha</button>`,
+    buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Abrir', value: 'ok', primary: true }],
+    init: (dlg, finish) => { dlg.querySelector('[data-forgot]').onclick = () => finish({ value: 'forgot' }); },
+    validate: async (v, d) => {
+      if (!d.pw) return 'Digite a senha.';
+      if (!await cx.checkVerifier(f.lock, d.pw)) return 'Senha incorreta.';
+    },
+  });
+  if (r?.value === 'forgot') { startEmailCheck({ kind: 'folder', id }); return false; }
+  if (!r) return false;
+  unlockedFolders.add(id);
+  collapsed.delete(id);
+  refreshDrawer();
+  return true;
+}
+
+function closeIfInFolder(id) {
+  if (current?.folder_id === id) { flushSave().then(() => { current = null; showEmpty(); }); }
+}
+
+const folderPwFields = `<label>Senha<input type="password" name="pw" autocomplete="new-password"></label>
+  <label>Confirmar senha<input type="password" name="pw2" autocomplete="new-password"></label>`;
+const checkPw = d => {
+  if (d.pw.length < 4) return 'A senha precisa ter pelo menos 4 caracteres.';
+  if (d.pw !== d.pw2) return 'As senhas não conferem.';
+};
+
+async function setFolderPassword(id) {
+  const f = store.folders.get(id);
+  const r = await modal({
+    title: 'Proteger pasta com senha',
+    body: `<p class="muted">A pasta “${esc(f.name)}” ficará fechada: as anotações de dentro só aparecem depois de digitar a senha.</p>
+      ${folderPwFields}
+      <p class="hint">Esqueceu? Dá para redefinir por um código enviado ao seu e-mail. Para proteger o conteúdo com criptografia, use também a senha da própria anotação.</p>`,
+    buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Proteger', value: 'ok', primary: true }],
+    validate: (v, d) => checkPw(d),
+  });
+  if (!r) return;
+  f.lock = await cx.makeVerifier(r.data.pw);
+  unlockedFolders.delete(id);
+  await store.saveFolder(f);
+  closeIfInFolder(id);
+  toast('Pasta protegida.');
+}
+
+async function changeFolderPassword(id) {
+  const f = store.folders.get(id);
+  const r = await modal({
+    title: `Senha da pasta “${f.name}”`,
+    body: `<label>Senha atual<input type="password" name="cur" autocomplete="current-password"></label>
+      <label>Nova senha (deixe em branco para remover a proteção)<input type="password" name="pw" autocomplete="new-password"></label>
+      <label>Confirmar nova senha<input type="password" name="pw2" autocomplete="new-password"></label>
+      <button type="button" class="link" data-forgot style="justify-self:start">Esqueci a senha atual</button>`,
+    buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Salvar', value: 'ok', primary: true }],
+    init: (dlg, finish) => { dlg.querySelector('[data-forgot]').onclick = () => finish({ value: 'forgot' }); },
+    validate: async (v, d) => {
+      if (!await cx.checkVerifier(f.lock, d.cur)) return 'Senha atual incorreta.';
+      if (d.pw || d.pw2) return checkPw(d);
+    },
+  });
+  if (r?.value === 'forgot') return startEmailCheck({ kind: 'folder', id });
+  if (!r) return;
+  f.lock = r.data.pw ? await cx.makeVerifier(r.data.pw) : null;
+  await store.saveFolder(f);
+  toast(f.lock ? 'Senha da pasta alterada.' : 'Proteção da pasta removida.');
+}
+
+async function finishFolderRecovery(id) {
+  localStorage.removeItem('nt_recover');
+  const f = store.folders.get(id);
+  if (!f) return toast('Pasta não encontrada.', 'err');
+  const r = await modal({
+    title: 'E-mail confirmado',
+    body: `<p>Defina uma nova senha para a pasta “${esc(f.name)}” ou remova a proteção.</p>${folderPwFields}`,
+    buttons: [{ label: 'Cancelar', cancel: true }, { label: 'Remover senha', value: 'remove', danger: true, left: true }, { label: 'Salvar nova senha', value: 'save', primary: true }],
+    validate: (v, d) => (v === 'save' ? checkPw(d) : undefined),
+  });
+  if (!r) return;
+  f.lock = r.value === 'save' ? await cx.makeVerifier(r.data.pw) : null;
+  unlockedFolders.add(id);
+  await store.saveFolder(f);
+  toast(f.lock ? 'Senha da pasta alterada.' : 'Proteção da pasta removida.');
+}
+
+// ---------- baixar pasta como ZIP de PDFs ----------
+const loadScript = src => new Promise((res, rej) => {
+  if (document.querySelector(`script[src="${src}"]`)) return res();
+  const s = document.createElement('script');
+  s.src = src; s.onload = res; s.onerror = () => rej(new Error('Não foi possível carregar ' + src));
+  document.head.append(s);
+});
+async function loadPdfLibs() {
+  await Promise.all([
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'),
+  ]);
+}
+
+const safeName = s => (s || 'Sem título').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Sem título';
+
+async function noteContentFor(n) {
+  await store.loadContent(n.id);
+  if (!n.locked) return n.content || emptyContent();
+  let dek = deks.get(n.id);
+  if (!dek) {
+    dek = await askNotePassword(n);
+    if (!dek) return null;
+    deks.set(n.id, dek);
+  }
+  return cx.decryptContent(dek, n.enc);
+}
+
+async function downloadFolderZip(id) {
+  if (!await unlockFolder(id)) return;
+  await flushSave();
+  const f = store.folders.get(id);
+  const notes = [...store.notes.values()].filter(n => n.folder_id === id).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
+  if (!notes.length) return toast('Esta pasta está vazia.');
+  const t = busyToast('Preparando o ZIP…');
+  try {
+    await loadPdfLibs();
+    const zip = new JSZip();
+    const used = new Set();
+    const skipped = [];
+    for (const [i, n] of notes.entries()) {
+      t.querySelector('span:last-child').textContent = `Gerando PDF ${i + 1} de ${notes.length}: ${n.title}`;
+      let content;
+      try { content = await noteContentFor(n); } catch { content = null; }
+      if (!content) { skipped.push(n.title); continue; }
+      let name = safeName(n.title), k = 2;
+      while (used.has(name.toLowerCase())) name = `${safeName(n.title)} (${k++})`;
+      used.add(name.toLowerCase());
+      zip.file(name + '.pdf', await notePdf(n.title, content));
+    }
+    if (!used.size) return toast('Nenhuma anotação foi incluída.', 'err');
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = safeName(f.name) + '.zip';
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(skipped.length ? `ZIP baixado. Ficaram de fora (senha não informada): ${skipped.join(', ')}` : 'ZIP baixado.', 'info', 6000);
+  } catch (e) {
+    toast('Não foi possível gerar o ZIP: ' + e.message, 'err', 6000);
+  } finally { t.close(); }
+}
+
+// Renderiza a anotação (texto, código, imagens e desenhos) fora da tela e converte em PDF A4.
+async function notePdf(title, c) {
+  const W = 880;
+  const box = document.createElement('div');
+  box.className = 'pdf-render';
+  const style = c.style || {};
+  box.style.cssText = `position:fixed;left:-10000px;top:0;width:${W}px;background:${style.bg || '#ffffff'};color:${style.color || '#1d2433'};`;
+  box.innerHTML = `<h1 class="pdf-title">${esc(title)}</h1><div class="pdf-page"><div class="layer pdf-under"></div><div class="doc"></div><div class="layer pdf-over"></div></div>`;
+  const doc = box.querySelector('.doc');
+  doc.innerHTML = ed.sanitize(c.html || '');
+  if (style.font) doc.style.fontFamily = style.font;
+  if (style.size) doc.style.fontSize = style.size + 'px';
+  doc.querySelectorAll('pre').forEach(pre => {
+    const code = pre.querySelector('code') || pre;
+    const lang = ed.normLang(pre.dataset.lang);
+    const map = { html: 'xml', text: 'plaintext' };
+    try { code.innerHTML = hljs.highlight(code.textContent, { language: map[lang] || lang, ignoreIllegals: true }).value; } catch {}
+    pre.className = 'pdf-code hljs';
+  });
+  ob.renderInto(c.objects || [], box.querySelector('.pdf-under'), box.querySelector('.pdf-over'));
+  document.body.append(box);
+  try {
+    await Promise.all([...box.querySelectorAll('img')].map(img => img.complete ? 0 : new Promise(r => { img.onload = img.onerror = r; })));
+    const canvas = await html2canvas(box, { scale: 2, backgroundColor: style.bg || '#ffffff', useCORS: true, logging: false });
+    const pdf = new jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+    const pageW = 210, pageH = 297, margin = 10;
+    const imgW = pageW - margin * 2;
+    const pxPerMm = canvas.width / imgW;
+    const sliceH = Math.floor((pageH - margin * 2) * pxPerMm);
+    for (let y = 0, page = 0; y < canvas.height; y += sliceH, page++) {
+      const h = Math.min(sliceH, canvas.height - y);
+      const part = document.createElement('canvas');
+      part.width = canvas.width; part.height = h;
+      const ctx = part.getContext('2d');
+      ctx.fillStyle = style.bg || '#ffffff';
+      ctx.fillRect(0, 0, part.width, h);
+      ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+      if (page) pdf.addPage();
+      if (style.bg) { pdf.setFillColor(style.bg); pdf.rect(0, 0, pageW, pageH, 'F'); }
+      pdf.addImage(part.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, imgW, h / pxPerMm);
+    }
+    return pdf.output('arraybuffer');
+  } finally { box.remove(); }
 }
 
 async function newFolderDialog() {
@@ -305,6 +532,7 @@ async function renameFolder(id) {
 }
 
 async function deleteFolder(id) {
+  if (!await unlockFolder(id)) return;
   const f = store.folders.get(id);
   if (await confirmDialog('Excluir pasta', `Excluir a pasta “${f.name}”? As anotações dela não são apagadas, vão para “Sem pasta”.`, 'Excluir', true)) {
     await store.deleteFolder(id);
@@ -406,6 +634,7 @@ async function openNote(id) {
   await flushSave();
   const n = store.notes.get(id);
   if (!n) return;
+  if (n.folder_id && isFolderLocked(n.folder_id) && !await unlockFolder(n.folder_id)) return;
   try { await store.loadContent(id); } catch (e) { return toast(e.message, 'err', 5000); }
   let content;
   if (n.locked) {
@@ -591,15 +820,22 @@ async function callFn(name, body) {
 }
 
 // --- recuperar / alterar senha via e-mail ---
-async function startRecovery(noteId) {
+const startRecovery = noteId => startEmailCheck({ kind: 'note', id: noteId });
+
+// Confirma a identidade por e-mail (link ou código) antes de trocar/recuperar uma senha.
+// target: { kind: 'note' | 'folder', id }
+async function startEmailCheck(target) {
   if (mode !== 'cloud' || !sb) return toast('Alterar ou recuperar senha exige estar conectado à sua conta.', 'err');
   const email = user.email;
-  localStorage.setItem('nt_recover', JSON.stringify({ noteId, uid: user.id, ts: Date.now() }));
+  const name = target.kind === 'folder'
+    ? `a pasta “${store.folders.get(target.id)?.name || ''}”`
+    : `“${store.notes.get(target.id)?.title || ''}”`;
+  localStorage.setItem('nt_recover', JSON.stringify({ ...target, uid: user.id, ts: Date.now() }));
   const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: appUrl() } });
   if (error) return toast(translateAuth(error.message), 'err', 6000);
   const r = await modal({
     title: 'Confirme pelo seu e-mail',
-    body: `<p>Para alterar ou recuperar a senha de “${esc(store.notes.get(noteId)?.title)}”, enviamos um e-mail para <b>${esc(email)}</b>.</p>
+    body: `<p>Para alterar ou recuperar a senha de ${esc(name)}, enviamos um e-mail para <b>${esc(email)}</b>.</p>
       <p class="muted">Abra o link do e-mail <b>neste aparelho</b>. Se o e-mail trouxer um código, você pode digitá-lo aqui.</p>
       <label>Código (opcional)<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>`,
     buttons: [{ label: 'Fechar', cancel: true }, { label: 'Verificar código', value: 'ok', primary: true }],
@@ -609,7 +845,12 @@ async function startRecovery(noteId) {
       if (error) return 'Código inválido ou expirado.';
     },
   });
-  if (r) finishRecovery(noteId);
+  if (r) finishTarget(target);
+}
+
+function finishTarget(t) {
+  if (t.kind === 'folder') finishFolderRecovery(t.id);
+  else finishRecovery(t.id ?? t.noteId);
 }
 
 function jwtClaims(t) {
@@ -627,7 +868,7 @@ async function checkPendingRecovery() {
   const { data: { session } } = await sb.auth.getSession();
   const amr = jwtClaims(session?.access_token || '').amr || [];
   const recent = amr.some(a => ['otp', 'magiclink'].includes(a.method) && Date.now() / 1000 - a.timestamp < 15 * 60);
-  if (recent) finishRecovery(p.noteId);
+  if (recent) finishTarget(p);
 }
 
 let recovering = false;
@@ -803,7 +1044,8 @@ async function aiNoteDialog() {
 
 async function aiDrawerDialog() {
   if (!navigator.onLine) return toast('A IA precisa de internet.', 'err');
-  const all = [...store.notes.values()];
+  // anotações de pastas trancadas ficam de fora da organização
+  const all = [...store.notes.values()].filter(n => !(n.folder_id && isFolderLocked(n.folder_id)));
   if (!all.length) return toast('A Gaveta está vazia.');
   const r = await modal({
     title: 'IA — organizar a Gaveta',

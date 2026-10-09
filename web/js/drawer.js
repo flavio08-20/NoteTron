@@ -10,9 +10,11 @@ const fmtDate = iso => {
     : d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
 };
 
-export function renderDrawer(el, { notes, folders, activeId, query, collapsed }, h) {
+export function renderDrawer(el, { notes, folders, activeId, query, collapsed, isLocked = () => false }, h) {
   const q = norm(query);
-  const match = n => !q || norm(n.title).includes(q) || norm(n.search_text).includes(q);
+  // anotações de pastas trancadas não aparecem nem na busca
+  const hidden = n => n.folder_id && isLocked(n.folder_id);
+  const match = n => !hidden(n) && (!q || norm(n.title).includes(q) || norm(n.search_text).includes(q));
   const list = notes.filter(match).sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
   const fids = new Set(folders.map(f => f.id));
   const sortedFolders = [...folders].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
@@ -36,15 +38,19 @@ export function renderDrawer(el, { notes, folders, activeId, query, collapsed },
     return row;
   };
 
+  // folder = null → seção "Sem pasta" (anotações fora de pastas)
   const section = (folder, items) => {
+    const key = folder ? folder.id : '__loose';
+    const locked = folder && isLocked(folder.id);
     const sec = document.createElement('div');
-    const isCollapsed = !q && folder && collapsed.has(folder.id);
-    sec.className = 'folder' + (isCollapsed ? ' collapsed' : '');
+    const isCollapsed = locked || (!q && collapsed.has(key));
+    sec.className = 'folder' + (isCollapsed ? ' collapsed' : '') + (locked ? ' locked' : '');
     const head = document.createElement('div');
     head.className = 'folder-head';
-    head.innerHTML = `<button class="folder-toggle">${icon('chev', 'chev')}${icon(folder ? 'folder' : 'file')}<span class="n">${esc(folder ? folder.name : 'Sem pasta')}</span><span class="count">${items.length}</span></button>`
+    const ic = !folder ? 'file' : locked ? 'lock' : folder.lock ? 'unlock' : 'folder';
+    head.innerHTML = `<button class="folder-toggle" title="${locked ? 'Pasta protegida: clique para abrir' : ''}">${icon('chev', 'chev')}${icon(ic, folder?.lock ? 'lock' : '')}<span class="n">${esc(folder ? folder.name : 'Sem pasta')}</span><span class="count">${locked ? '' : items.length}</span></button>`
       + (folder ? `<button class="icon-btn" title="Opções da pasta">${icon('more')}</button>` : '');
-    head.querySelector('.folder-toggle').onclick = () => folder && h.toggleFolder(folder.id);
+    head.querySelector('.folder-toggle').onclick = () => (locked ? h.unlockFolder(folder.id) : h.toggleFolder(key));
     if (folder) head.querySelector('.icon-btn').onclick = e => h.folderMenu(folder.id, e.currentTarget);
     // soltar anotação na pasta
     head.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('text/x-note')) { e.preventDefault(); head.classList.add('drop'); } });
@@ -68,7 +74,8 @@ export function renderDrawer(el, { notes, folders, activeId, query, collapsed },
     el.append(section(f, items));
   }
   const loose = list.filter(n => !n.folder_id || !fids.has(n.folder_id));
-  if (folders.length) { if (loose.length || !q) el.append(section(null, loose)); }
+  // "Sem pasta" só aparece quando há anotações fora de pastas
+  if (folders.length) { if (loose.length) el.append(section(null, loose)); }
   else loose.forEach(n => el.append(noteRow(n)));
 
   if (q && !list.length) el.insertAdjacentHTML('beforeend', `<div class="list-empty">Nada encontrado para “${esc(query)}”.</div>`);

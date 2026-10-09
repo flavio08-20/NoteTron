@@ -358,3 +358,32 @@ details.pw-box label { margin-bottom: 10px; }
   .cb-body textarea, .cb-head button { display: none; }
   .cb-head select { border: 0; appearance: none; background: none; }
 }
+
+/* ================= GERAÇÃO DE PDF (fora da tela) ================= */
+.pdf-render { font: 16px/1.65 Inter, system-ui, sans-serif; }
+.pdf-render .pdf-title { font-size: 26px; margin: 0; padding: 32px 48px 0; letter-spacing: -.01em; }
+.pdf-render .pdf-page { position: relative; }
+.pdf-render .layer { position: absolute; inset: 0; }
+.pdf-render .pdf-under { z-index: 1; }
+.pdf-render .pdf-over { z-index: 3; }
+.pdf-render .doc { position: relative; z-index: 2; padding: 40px 48px 48px; overflow-wrap: anywhere; }
+.pdf-render .doc h1 { font-size: 1.9em; line-height: 1.25; margin: .6em 0 .3em; }
+.pdf-render .doc h2 { font-size: 1.45em; line-height: 1.3; margin: .6em 0 .3em; }
+.pdf-render .doc h3 { font-size: 1.2em; margin: .6em 0 .3em; }
+.pdf-render .doc p { margin: 0 0 .5em; }
+.pdf-render .doc ul, .pdf-render .doc ol { padding-left: 1.6em; margin: 0 0 .6em; }
+.pdf-render .doc blockquote { margin: .6em 0; padding: .2em 1em; border-left: 4px solid #5b5bd6; color: #6b7385; }
+.pdf-render .doc a { color: #5b5bd6; }
+.pdf-render .doc table { border-collapse: collapse; margin: .6em 0; }
+.pdf-render .doc th, .pdf-render .doc td { border: 1px solid #d0d5e0; padding: 4px 8px; }
+.pdf-render .doc hr { border: 0; border-top: 1px solid #d0d5e0; margin: 1em 0; }
+.pdf-render .pdf-code { margin: .8em 0; padding: 12px 14px; border-radius: 10px; border: 1px solid #d0d5e0; background: #f6f8fa; color: #24292f; font: 13.5px/1.55 "Roboto Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+:root[data-theme="dark"] .pdf-render .pdf-code { background: #0d1117; color: #e6edf3; border-color: #30363d; }
+.pdf-render .pdf-code code { font: inherit; background: none; padding: 0; }
+.pdf-render .obj { position: absolute; }
+.pdf-render .obj img { width: 100%; height: 100%; display: block; }
+.pdf-render .obj svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+/* pasta trancada */
+.folder.locked .folder-toggle { color: var(--text); }
+.folder-head svg.lock { color: #d97706; }

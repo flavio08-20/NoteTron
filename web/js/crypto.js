@@ -51,3 +51,19 @@ export async function decryptContent(dek, enc) {
   const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(enc.iv) }, await dataKey(dek), fromB64(enc.ct));
   return JSON.parse(td.decode(pt));
 }
+
+// ---------- senha de pasta (só verificador, não cifra dados) ----------
+async function pbkdf2Bits(pw, salt, iter) {
+  const base = await crypto.subtle.importKey('raw', te.encode(pw), 'PBKDF2', false, ['deriveBits']);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, base, 256));
+}
+
+export async function makeVerifier(pw) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return { v: 1, salt: toB64(salt), iter: ITER, hash: toB64(await pbkdf2Bits(pw, salt, ITER)) };
+}
+
+export async function checkVerifier(lock, pw) {
+  const h = toB64(await pbkdf2Bits(pw, fromB64(lock.salt), lock.iter));
+  return h === lock.hash;
+}
