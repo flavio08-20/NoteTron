@@ -209,7 +209,7 @@ function translateAuth(msg = '') {
 }
 
 function showAuth() {
-  user = null; mode = null; current = null; deks.clear();
+  user = null; mode = null; current = null; deks.clear(); folderKeys.clear();
   $('#app').classList.add('hidden');
   $('#auth').classList.remove('hidden');
   $('#config-warning').hidden = isConfigured();
@@ -630,7 +630,17 @@ async function noteContentFor(n) {
 }
 
 async function downloadFolderZip(id) {
+  const wasLocked = isFolderLocked(id);
   if (!await unlockFolder(id)) return;
+  try { await buildFolderZip(id); }
+  finally {
+    // senhas digitadas só para exportar não ficam guardadas
+    for (const n of notesIn(id)) if (n.locked && n.id !== current?.id) deks.delete(n.id);
+    if (wasLocked && current?.folder_id !== id) { forgetFolderKey(id); refreshDrawer(); }
+  }
+}
+
+async function buildFolderZip(id) {
   await flushSave();
   const f = store.folders.get(id);
   const notes = [...store.notes.values()].filter(n => n.folder_id === id).sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'));
@@ -856,10 +866,36 @@ async function openNote(id) {
     try { content = await cx.decryptContent(dek, n.enc); }
     catch { deks.delete(id); return toast('Não foi possível abrir: senha ou dados inválidos.', 'err'); }
   } else content = n.content || emptyContent();
+  const prev = current;
   current = n;
+  forgetKeysOnLeave(prev, n);
   loadIntoEditor(content);
   localStorage.setItem('nt_last_note_' + user.id, id);
   refreshDrawer();
+}
+
+// Ao sair de uma anotação protegida, esquece a chave dela: para voltar, pede a senha de novo.
+// Ao sair de uma pasta com senha (abrindo algo de fora), a pasta se tranca.
+function forgetKeysOnLeave(prev, next) {
+  if (!prev || prev.id === next?.id) return;
+  if (prev.locked) deks.delete(prev.id);
+  const fid = prev.folder_id;
+  if (fid && store.folders.get(fid)?.lock && next?.folder_id !== fid) forgetFolderKey(fid);
+}
+
+function forgetFolderKey(fid) {
+  folderKeys.delete(fid);
+  for (const n of notesIn(fid)) if (isFolderEncrypted(n) && n.id !== current?.id) deks.delete(n.id);
+}
+
+// Tranca tudo (chaves fora da memória) e fecha a anotação protegida que estiver aberta.
+async function lockEverything() {
+  if (!current && !deks.size && !folderKeys.size) return;
+  await flushSave();
+  const wasProtected = current?.enc;
+  deks.clear();
+  folderKeys.clear();
+  if (wasProtected) { current = null; showEmpty(); } else refreshDrawer();
 }
 
 function loadIntoEditor(c) {
@@ -1540,7 +1576,21 @@ function bindApp() {
     if (e.key === 'Escape') { ob.select(null); if ($('#page').classList.contains('mode-draw')) setMode('text'); }
   });
 
-  addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+  // em segundo plano por mais de 1 minuto (outra aba, app minimizado, celular bloqueado): tranca tudo
+  // (o horário também é conferido na volta, porque o celular pode congelar o timer)
+  let autoLockTimer = null, hiddenAt = 0;
+  addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushSave();
+      hiddenAt = Date.now();
+      clearTimeout(autoLockTimer);
+      autoLockTimer = setTimeout(lockEverything, 60 * 1000);
+    } else {
+      clearTimeout(autoLockTimer);
+      if (hiddenAt && Date.now() - hiddenAt >= 60 * 1000) lockEverything();
+      hiddenAt = 0;
+    }
+  });
   addEventListener('beforeunload', () => { if (unsaved) saveCurrent(); });
 }
 
