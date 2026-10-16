@@ -22,6 +22,23 @@ O NoteTron é um **Progressive Web App**: funciona no navegador, pode ser instal
 
 O projeto foi feito **sem framework e sem etapa de build**, em JavaScript moderno com módulos ES nativos, para manter o código direto e fácil de ler.
 
+## Telas
+
+<p align="center">
+  <img src="docs/screenshots/editor.png" alt="Editor do NoteTron com a Gaveta, pastas e uma pasta protegida por senha" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/login.png" alt="Tela de login com Google ou e-mail"></td>
+    <td width="50%"><img src="docs/screenshots/nova-anotacao.png" alt="Criação de anotação com pasta e senha opcional"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Login com Google ou e-mail</sub></td>
+    <td align="center"><sub>Nova anotação com pasta e senha opcional</sub></td>
+  </tr>
+</table>
+
 ## Funcionalidades
 
 **Editor**
