@@ -24,6 +24,15 @@ const emptyContent = () => ({ v: 1, html: '<p><br></p>', style: {}, objects: [] 
 // =====================================================================
 // INÍCIO
 // =====================================================================
+// Erro inesperado: avisa em vez de deixar a tela vazia
+const showFatal = e => {
+  console.error(e);
+  if ($('#app').classList.contains('hidden') && $('#auth').classList.contains('hidden')) $('#auth').classList.remove('hidden');
+  toast('Algo deu errado: ' + (e?.message || e) + '. Recarregue a página.', 'err', 10000);
+};
+addEventListener('unhandledrejection', ev => showFatal(ev.reason));
+addEventListener('error', ev => { if (ev.error) showFatal(ev.error); });
+
 boot();
 
 async function boot() {
@@ -239,10 +248,10 @@ async function enterApp(m, u) {
   mode = m; user = u;
   if (m === 'cloud') localStorage.setItem('nt_last_user', JSON.stringify({ id: u.id, email: u.email }));
   // botões de IA: só para contas liberadas no servidor (tabela app_admins)
-  $('.owner-only').forEach(el => el.classList.add('hidden'));
+  $$('.owner-only').forEach(el => el.classList.add('hidden'));
   if (m === 'cloud') {
     callFn('ai', { mode: 'access' })
-      .then(r => { if (user?.id === u.id) $('.owner-only').forEach(el => el.classList.toggle('hidden', !r?.allowed)); })
+      .then(r => { if (user?.id === u.id) $$('.owner-only').forEach(el => el.classList.toggle('hidden', !r?.allowed)); })
       .catch(() => {});
   }
   $('#auth').classList.add('hidden');

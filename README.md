@@ -12,6 +12,8 @@
 ![Web Crypto](https://img.shields.io/badge/Criptografia-AES--256--GCM-1d2433)
 ![Sem build](https://img.shields.io/badge/build-nenhum-lightgrey)
 
+### ▶ [Experimente agora: **notetron.pages.dev**](https://notetron.pages.dev)
+
 </div>
 
 ---
@@ -21,6 +23,19 @@
 O NoteTron é um **Progressive Web App**: funciona no navegador, pode ser instalado como aplicativo no Windows, macOS, Android e iPhone, e continua funcionando **offline**. As anotações ficam salvas no aparelho e sincronizam com a nuvem quando há conexão.
 
 O projeto foi feito **sem framework e sem etapa de build**, em JavaScript moderno com módulos ES nativos, para manter o código direto e fácil de ler.
+
+## Como testar
+
+1. Acesse **[notetron.pages.dev](https://notetron.pages.dev)**.
+2. Entre com o **Google**, crie uma conta com e-mail (a confirmação chega por código) ou clique em **"Usar sem conta"** para testar sem cadastro. Nessa opção, tudo fica salvo só no seu navegador.
+3. Sugestões do que experimentar:
+   - criar uma anotação e inserir um **bloco de código** (digite `def` e aperte <kbd>Tab</kbd> num bloco Python);
+   - colar uma imagem e destacá-la com uma forma;
+   - alternar para o **modo desenho**;
+   - criar uma pasta com senha e ver as anotações sumirem da Gaveta ao trancar.
+4. Para instalar como aplicativo, use o botão **Instalar** do navegador (veja [Instalar como aplicativo](#instalar-como-aplicativo)).
+
+> A **IA** está **privada no momento** (veja [IA](#ia)). Os demais recursos estão liberados para qualquer conta.
 
 ## Telas
 
@@ -43,12 +58,7 @@ O projeto foi feito **sem framework e sem etapa de build**, em JavaScript modern
 
 **Editor**
 - Texto rico: fontes, tamanhos, cor da fonte e de fundo, negrito, listas e títulos. A formatação vale para o trecho selecionado ou para a nota inteira.
-- **Blocos de código** com destaque de sintaxe (Python, JavaScript, TypeScript, C#, HTML e CSS) e um assistente no estilo VS Code:
-  - autocompletar com prévia em cinza, aceito com <kbd>Tab</kbd>;
-  - snippets (`def`, `for`, `class`, `log`, tags HTML…);
-  - fechamento automático de `() [] {} "" ''` e de tags HTML;
-  - indentação automática no Enter e <kbd>Shift</kbd>+<kbd>Tab</kbd> para desindentar;
-  - blocos que podem ser arrastados para reordenar.
+- **Blocos de código** com destaque de sintaxe e assistente no estilo VS Code (detalhes [abaixo](#blocos-de-código)).
 - **Modo desenho**: caneta, borracha, linhas, setas e formas (retângulo, elipse, triângulo, losango, hexágono, estrela).
 - **Imagens**: colar, enviar ou arrastar; redimensionar; recortar ou contornar com uma forma; controlar camadas, inclusive "atrás do texto".
 - Desfazer e refazer, tema claro e escuro, exportação para PDF.
@@ -64,9 +74,29 @@ O projeto foi feito **sem framework e sem etapa de build**, em JavaScript modern
 - Trancamento automático ao sair da anotação ou da pasta, ou após 1 minuto com o app em segundo plano.
 - Login por e-mail e senha (com confirmação por código) ou com o **Google**.
 
-**IA** (OpenAI, liberada por conta)
-- Organizar, formatar, resumir, corrigir e gerar perguntas de estudo a partir de uma anotação.
-- Sugerir pastas e títulos para organizar a Gaveta inteira.
+## Blocos de código
+
+Cada anotação pode ter vários blocos de código, inseridos pelo botão `</>` da barra.
+
+| Recurso | Como funciona |
+|---|---|
+| **Linguagens** | Python, JavaScript, TypeScript, C#, HTML, CSS e texto simples, com troca a qualquer momento |
+| **Destaque de sintaxe** | Cores por tipo de token, em tempo real (highlight.js) |
+| **Autocompletar** | A partir da 2ª letra, mostra a sugestão em cinza e uma lista. <kbd>Tab</kbd> aceita, <kbd>↑</kbd>/<kbd>↓</kbd> escolhem e <kbd>Esc</kbd> fecha. As sugestões incluem palavras-chave da linguagem e nomes que você já usou no bloco. |
+| **Snippets** | `def`, `class`, `for`, `if`, `try`, `main` (Python); `function`, `arrow`, `log`, `fetch` (JS/TS); `interface`, `type` (TS); `cw`, `prop`, `foreach` (C#); tags e `html5` (HTML); propriedades (CSS). O trecho a preencher já vem selecionado. |
+| **Pares automáticos** | `(` vira `()`, e o mesmo vale para `[]`, `{}`, aspas e crases. Digitar o fechamento pula o existente, e o Backspace apaga o par vazio. |
+| **Tags HTML** | `<div>` vira `<div></div>` com o cursor no meio |
+| **Indentação** | O Enter mantém o recuo e indenta depois de `:` (Python), `{` ou tag aberta. Entre `{}`, abre o bloco. <kbd>Tab</kbd> e <kbd>Shift</kbd>+<kbd>Tab</kbd> indentam ou desindentam várias linhas. |
+| **Organização** | Arraste pela alça ⠿ para reordenar (mouse ou toque). Botão **Copiar** e botão de remover. |
+| **Importação** | Arquivos `.py`, `.js`, `.ts`, `.cs`, `.html` e `.css` viram blocos de código. Blocos de código Markdown (<code>```</code>) também são reconhecidos. |
+
+## IA
+
+A IA (OpenAI `gpt-4o-mini`, chamada só pelo servidor) ajuda a:
+- **organizar, formatar, resumir, corrigir** e **gerar perguntas de estudo** a partir de uma anotação;
+- sugerir **pastas e títulos** para organizar a Gaveta inteira.
+
+> 🔒 **A IA é privada no momento.** Os botões de IA só aparecem para contas liberadas pelo administrador ([@flavio08-20](https://github.com/flavio08-20)). Quer testar? Entre em contato pelo GitHub informando o e-mail da sua conta no NoteTron.
 
 ## Arquitetura
 
@@ -134,14 +164,6 @@ supabase/
   functions/note-key/     recuperação de chaves por e-mail
   templates/              e-mails com código + link
 ```
-
-## Rodar localmente
-
-```bash
-npx http-server web -p 5173 -c-1
-```
-
-Abra http://localhost:5173. Para testar sem backend, use **"Usar sem conta"**: tudo fica salvo só no navegador.
 
 ## Usar com o seu próprio Supabase
 
