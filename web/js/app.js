@@ -1,5 +1,5 @@
 // NoteTron — módulo principal.
-import { SUPABASE_URL, SUPABASE_ANON_KEY, OWNER_EMAIL, SUPABASE_ESM, isConfigured } from './config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_ESM, isConfigured } from './config.js';
 import { applyIcons, icon } from './icons.js';
 import { $, $$, esc, debounce, toast, busyToast, modal, confirmDialog, menu, initTheme, toggleTheme, plainFromHTML } from './ui.js';
 import * as store from './store.js';
@@ -9,7 +9,7 @@ import * as ob from './objects.js';
 import { renderDrawer } from './drawer.js';
 import { ACCEPT, filesToNotes, fileToHTML, isImportable, compressImage } from './importer.js';
 
-let sb = null, user = null, mode = null, isOwner = false;
+let sb = null, user = null, mode = null;
 let current = null;              // anotação aberta
 const deks = new Map();          // chaves das anotações destrancadas nesta sessão
 let noteStyle = {};
@@ -238,8 +238,13 @@ async function enterApp(m, u) {
   if (user && user.id === u.id && mode === m) return;
   mode = m; user = u;
   if (m === 'cloud') localStorage.setItem('nt_last_user', JSON.stringify({ id: u.id, email: u.email }));
-  isOwner = m === 'cloud' && (u.email || '').toLowerCase() === OWNER_EMAIL.toLowerCase();
-  $$('.owner-only').forEach(el => el.classList.toggle('hidden', !isOwner));
+  // botões de IA: só para contas liberadas no servidor (tabela app_admins)
+  $('.owner-only').forEach(el => el.classList.add('hidden'));
+  if (m === 'cloud') {
+    callFn('ai', { mode: 'access' })
+      .then(r => { if (user?.id === u.id) $('.owner-only').forEach(el => el.classList.toggle('hidden', !r?.allowed)); })
+      .catch(() => {});
+  }
   $('#auth').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#user-email').textContent = u.email || '';

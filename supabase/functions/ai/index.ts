@@ -1,11 +1,10 @@
 // Edge Function "ai": organiza/formata anotações e a Gaveta usando a API da OpenAI.
-// Por enquanto liberada só para o dono (OWNER_EMAIL).
+// Liberada só para as contas cadastradas na tabela public.app_admins.
 //
 // Secrets necessários: OPENAI_API_KEY
-// Opcionais: OWNER_EMAIL (padrão abaixo), OPENAI_MODEL (padrão gpt-4o-mini)
+// Opcional: OPENAI_MODEL (padrão gpt-4o-mini)
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
-const OWNER = (Deno.env.get("OWNER_EMAIL") ?? "flaviobertolotticorp@gmail.com").toLowerCase();
 const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
 
 const cors = {
@@ -66,11 +65,13 @@ Deno.serve(async (req) => {
     });
     const { data: { user } } = await admin.auth.getUser(jwt);
     if (!user) return json({ error: "Não autenticado" }, 401);
-    if ((user.email ?? "").toLowerCase() !== OWNER || !user.email_confirmed_at) {
-      return json({ error: "A IA ainda não está disponível para esta conta." }, 403);
-    }
+    const { data: admin_row } = await admin.from("app_admins").select("user_id").eq("user_id", user.id).maybeSingle();
+    const allowed = !!admin_row && !!user.email_confirmed_at;
 
     const body = await req.json();
+    // o app pergunta se mostra os botões de IA
+    if (body.mode === "access") return json({ allowed });
+    if (!allowed) return json({ error: "A IA ainda não está disponível para esta conta." }, 403);
 
     if (body.mode === "note") {
       const html = String(body.html ?? "").slice(0, 120_000);

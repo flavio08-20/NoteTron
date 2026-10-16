@@ -1,9 +1,21 @@
+# dependências e temporários
 node_modules/
+.wrangler/
+supabase/.temp/
+*.log
 .DS_Store
 Thumbs.db
-*.log
+
+# segredos e configurações locais — nunca versionar
 .env
 .env.*
-supabase/.temp/
-.claude/settings.local.json
+*.pem
+*.key
+supabase/.env
+supabase/functions/.env
+
+# ferramentas locais
 .claude/
+.mcp.json
+.vscode/
+*.bundle

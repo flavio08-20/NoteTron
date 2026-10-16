@@ -1,5 +1,5 @@
 // Service worker do NoteTron: deixa o app abrir offline.
-const VERSION = 'notetron-v8';
+const VERSION = 'notetron-v9';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/config.js', 'js/icons.js', 'js/ui.js', 'js/db.js', 'js/store.js', 'js/crypto.js',
